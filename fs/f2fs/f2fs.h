@@ -1751,6 +1751,13 @@ struct f2fs_sb_info {
 	unsigned int compress_watermark;	/* cache page watermark */
 	atomic_t compress_page_hit;		/* cache hit count */
 #endif
+
+	/* hotness clustering */
+	block_t total_writed_block_count; // warm data block write count
+    unsigned int n_clusters;
+    unsigned int *centers; // hot, warm, cold in order
+	int centers_valid;
+    struct f2fs_hc_kthread *hc_thread;
 };
 
 struct f2fs_private_dio {
@@ -3652,6 +3659,15 @@ void f2fs_build_gc_manager(struct f2fs_sb_info *sbi);
 int f2fs_resize_fs(struct f2fs_sb_info *sbi, __u64 block_count);
 int __init f2fs_create_garbage_collection_cache(void);
 void f2fs_destroy_garbage_collection_cache(void);
+
+/*
+ * hc.c
+ */
+int f2fs_start_hc_thread(struct f2fs_sb_info *sbi);
+void f2fs_stop_hc_thread(struct f2fs_sb_info *sbi);
+void f2fs_build_hc_manager(struct f2fs_sb_info *sbi);
+int f2fs_create_hotness_clustering_cache(void);
+void f2fs_destroy_hotness_clustering_cache(void);
 
 /*
  * recovery.c
