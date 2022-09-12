@@ -2,6 +2,8 @@
 #define _LINUX_HC_H
 
 #include <linux/timex.h>
+#include <linux/workqueue.h>    /* for work queue */
+#include <linux/slab.h>         /* for kmalloc() */
 
 #define _F2FS_DEBUG
 
@@ -66,9 +68,15 @@ struct f2fs_hc_kthread {
 	unsigned int no_hc_sleep_time;
 };
 
-void insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, unsigned int *IRR, unsigned int *LWS, struct hotness_entry_info *hei);
-int lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, unsigned int *IRR, unsigned int *LWS);
-void delete_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);
+struct hotness_manage {
+    struct work_struct work;
+    struct hotness_entry he;
+};
+
+int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he);
+// int update_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he);
+struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);
+int delete_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);
 void save_hotness_entry(struct f2fs_sb_info *sbi);
 void load_hotness_entry(struct f2fs_sb_info *sbi);
 void release_hotness_entry(struct f2fs_sb_info *sbi);

@@ -565,14 +565,14 @@ static int stat_show(struct seq_file *s, void *v)
 		// 		seq_printf(s, "ino = %u, segno = %u, type = %u, temp = %u, io_type = %u, nid = %u, ofs_in_node = %u", he->hei->ino, he->hei->segno, he->hei->type, he->hei->temp, he->hei->io_type, he->hei->nid, he->hei->ofs_in_node);
 		// 	seq_printf(s, "\n");
 		// }
-		rcu_read_lock();
-		list_for_each_entry_rcu(he, &hc_list_ptr->ilist, list) {
-			seq_printf(s, "blk_addr = %u, IRR = %u, LWS = %u, ", he->blk_addr, he->IRR, he->LWS);
-			if (he->hei) 
-				seq_printf(s, "ino = %u, segno = %u, type = %u, temp = %u, io_type = %u, nid = %u, ofs_in_node = %u", he->hei->ino, he->hei->segno, he->hei->type, he->hei->temp, he->hei->io_type, he->hei->nid, he->hei->ofs_in_node);
-			seq_printf(s, "\n");
-		}
-		rcu_read_unlock();	
+		// rcu_read_lock();
+		// list_for_each_entry_rcu(he, &hc_list_ptr->ilist, list) {
+		// 	seq_printf(s, "blk_addr = %u, IRR = %u, LWS = %u, ", he->blk_addr, he->IRR, he->LWS);
+		// 	if (he->hei) 
+		// 		seq_printf(s, "ino = %u, segno = %u, type = %u, temp = %u, io_type = %u, nid = %u, ofs_in_node = %u", he->hei->ino, he->hei->segno, he->hei->type, he->hei->temp, he->hei->io_type, he->hei->nid, he->hei->ofs_in_node);
+		// 	seq_printf(s, "\n");
+		// }
+		// rcu_read_unlock();	
 		seq_printf(s, "new_blk_cnt = %u\n", hc_list_ptr->new_blk_cnt);
 		seq_printf(s, "new_blk_compress_cnt = %u\n", hc_list_ptr->new_blk_compress_cnt);
 		seq_printf(s, "upd_blk_cnt = %u\n", hc_list_ptr->upd_blk_cnt);

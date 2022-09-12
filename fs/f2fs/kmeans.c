@@ -26,7 +26,6 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
     1、对传入的热度数据进行k-means聚类
     2、聚类结果保存在f2fs_sb_info centers
     */
-    // printk("Doing f2fs_hc...\n");
     struct hotness_entry *he;
     int center_num = sbi->n_clusters;
     unsigned int *data = kmalloc(sizeof(unsigned int) * hc_list_ptr->count, GFP_KERNEL);
@@ -35,6 +34,8 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
     int i, flag, loop_count, j;
     if (hc_list_ptr->count > 1000000)
         return -1;
+    
+    printk("Doing f2fs_hc...\n");
 
     list_for_each_entry(he, &hc_list_ptr->ilist, list)
     {
@@ -89,11 +90,11 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
     for (i = 0; i < center_num; ++i)
         sbi->centers[i] = (unsigned int)mass_center[i * 3];
     bubble_sort(sbi->centers, center_num);
-    // printk("centers: ");
+    printk("centers: ");
     for (i = 0; i < center_num; i++) {
-        // printk("%u ", sbi->centers[i]);
+        printk("%u ", sbi->centers[i]);
     }
-    // printk("\n");
+    printk("\n");
     kfree(data);
     kfree(mass_center);
     return 0;
@@ -101,24 +102,22 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
 
 int kmeans_get_type(struct f2fs_io_info *fio)
 {
-    unsigned int old_IRR, old_LWS;
     unsigned int type;
-    int err;
-    err = lookup_hotness_entry(fio->sbi, fio->old_blkaddr, &old_IRR, &old_LWS);
+    struct hotness_entry *he = lookup_hotness_entry(fio->sbi, fio->old_blkaddr);
 
     printk("Doing kmeans_get_type...\n");
     
-    if (err) {
+    if (he) {
         printk("fail to lookup hotness_entry\n");
-        return err;
+        return -1;
     }
     if(fio->sbi->n_clusters == 3) {
-        type = MIN_3(diff(old_IRR, fio->sbi->centers[0]),
-                     diff(old_IRR, fio->sbi->centers[1]),
-                     diff(old_IRR, fio->sbi->centers[2]));
+        type = MIN_3(diff(he->IRR, fio->sbi->centers[0]),
+                     diff(he->IRR, fio->sbi->centers[1]),
+                     diff(he->IRR, fio->sbi->centers[2]));
     } else {
-        type = MIN_2(diff(old_IRR, fio->sbi->centers[0]),
-                     diff(old_IRR, fio->sbi->centers[1]));
+        type = MIN_2(diff(he->IRR, fio->sbi->centers[0]),
+                     diff(he->IRR, fio->sbi->centers[1]));
     }
     
     return type;
