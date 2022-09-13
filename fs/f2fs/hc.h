@@ -17,6 +17,7 @@ extern nid_t last_ino;
 extern nid_t last2_ino;
 #define MAX_SEGNO 4*1048576
 extern char segment_valid[MAX_SEGNO];
+extern struct workqueue_struct *wq;
 
 /* 热度定义 */
 struct hotness_entry
@@ -70,13 +71,17 @@ struct f2fs_hc_kthread {
 
 struct hotness_manage {
     struct work_struct work;
-    struct hotness_entry he;
+    struct hotness_entry *he;
+	block_t new_blkaddr;
+	block_t old_blkaddr;
 };
 
 int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he);
-// int update_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he);
+int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t new_blkaddr,  struct hotness_entry *he);
 struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);
 int delete_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);
+void insert_hotness_entry_work(struct work_struct *work);
+void update_hotness_entry_work(struct work_struct *work);
 void save_hotness_entry(struct f2fs_sb_info *sbi);
 void load_hotness_entry(struct f2fs_sb_info *sbi);
 void release_hotness_entry(struct f2fs_sb_info *sbi);

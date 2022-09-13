@@ -23,17 +23,18 @@ struct hc_list *hc_list_ptr;
 struct workqueue_struct *wq;
 nid_t last_ino;
 char segment_valid[MAX_SEGNO];
+struct workqueue_struct *wq;
 
 /* 热度元数据操作 */
 /* 1、添加 */
 // create
 int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he)
 {
-	
 	he = f2fs_kmem_cache_alloc(hotness_entry_slab, GFP_NOFS);
-	he->blk_addr = blkaddr,
-	he->IRR = __UINT32_MAX__,
-	he->LWS = sbi->total_writed_block_count;
+	he->blk_addr = blkaddr;
+	he->IRR = __UINT32_MAX__;
+	// he->LWS = sbi->total_writed_block_count;
+	hc_list_ptr->count++;
 	f2fs_radix_tree_insert(&hc_list_ptr->iroot, blkaddr, he);
 	spin_lock(&list_lock);
 	list_add_tail_rcu(&he->list, &hc_list_ptr->ilist);
@@ -41,14 +42,12 @@ int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotne
 	return 0;
 }
 
-// int update_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he)
-// {
-// 	radix_tree_delete(&hc_list_ptr->iroot, blkaddr);
-// 	f2fs_radix_tree_insert(&hc_list_ptr->iroot, blkaddr, he);
-// 	spin_lock(&list_lock);
-// 	list_add_tail_rcu(&he->list, &hc_list_ptr->ilist);
-// 	spin_unlock(&list_lock);
-// }
+int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t new_blkaddr, struct hotness_entry *he)
+{
+	f2fs_radix_tree_insert(&hc_list_ptr->iroot, new_blkaddr, he);
+	radix_tree_delete(&hc_list_ptr->iroot, old_blkaddr);
+	return 0;
+}
 
 /* 2、查询 */
 struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr)
@@ -79,6 +78,22 @@ int delete_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr)
 		return 0;
 	}
 	return -1;
+}
+
+void insert_hotness_entry_work(struct work_struct *work)
+{
+	// printk("In function: %s\n", __FUNCTION__);
+	struct hotness_manage *hm = container_of(work, struct hotness_manage, work);
+	insert_hotness_entry(NULL, hm->new_blkaddr, hm->he);
+	kfree(hm);
+}
+
+void update_hotness_entry_work(struct work_struct *work)
+{
+	// printk("In function: %s\n", __FUNCTION__);
+	struct hotness_manage *hm = container_of(work, struct hotness_manage, work);
+	update_hotness_entry(NULL, hm->old_blkaddr, hm->new_blkaddr, hm->he);
+	kfree(hm);
 }
 
 int f2fs_create_hotness_clustering_cache(void)
@@ -116,6 +131,8 @@ static void init_hc_management(struct f2fs_sb_info *sbi)
 	unsigned int count;
 
 	hc_list_ptr = &hc_list_var;
+
+	wq = alloc_workqueue("f2fs-hc-workqueue", WQ_UNBOUND | WQ_HIGHPRI, num_online_cpus());
 
 	fp = filp_open("/tmp/f2fs_hotness_no", O_RDWR, 0644);
 	if (IS_ERR(fp)) {
@@ -302,4 +319,8 @@ void release_hotness_entry(struct f2fs_sb_info *sbi)
 	}
 
 	kfree(sbi->centers);
+
+    // flush_workqueue(wq);
+    destroy_workqueue(wq);
+    printk("Work queue exit: %s\n", __FUNCTION__);
 }

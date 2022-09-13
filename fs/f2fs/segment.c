@@ -3483,6 +3483,7 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 	unsigned int segno;
 	struct hotness_entry *he;
 	// struct hotness_entry_info *new_hei;
+	struct hotness_manage *hm;
 	int type = __get_segment_type(fio);
 	bool keep_order = (f2fs_lfs_mode(fio->sbi) && type == CURSEG_COLD_DATA);
 
@@ -3507,8 +3508,8 @@ reallocate:
 
 	// printk("type = %u\n", fio->type);
 	// printk("fio->old_blkaddr = %u, fio->new_blkaddr = %u\n", fio->old_blkaddr, fio->new_blkaddr);
-	// if (type == CURSEG_WARM_DATA) {
-	if ((fio->type == DATA) && (fio->temp == WARM)) {
+	if (fio->type == DATA) {
+	// if ((fio->type == DATA) && (fio->temp == WARM)) {
 		// printk("%s type = %d temp = %d\n", __func__, fio->type, fio->temp);
        /*  
         1、累计写入块计数加一：total_writed_block_count++
@@ -3528,12 +3529,19 @@ reallocate:
 		// new_hei->ofs_in_node = sum->ofs_in_node;
 		// // new_hei->segno = fio->new_blkaddr >> 9;
 		// new_hei->segno = segno;
+		hm = kmalloc(sizeof(struct hotness_manage), GFP_KERNEL);
+		hm->he = he;
+		hm->new_blkaddr = fio->new_blkaddr;
         if (he) { // 存在
-			printk("%s he existed\n", __func__);
+			// printk("%s he existed\n", __func__);
 			he->IRR = fio->sbi->total_writed_block_count - he->IRR;
-			he->LWS = fio->sbi->total_writed_block_count;
-			f2fs_radix_tree_insert(&hc_list_ptr->iroot, fio->new_blkaddr, he);
-			radix_tree_delete(&hc_list_ptr->iroot, fio->old_blkaddr);
+			// he->LWS = fio->sbi->total_writed_block_count;
+			// f2fs_radix_tree_insert(&hc_list_ptr->iroot, fio->new_blkaddr, he);
+			// radix_tree_delete(&hc_list_ptr->iroot, fio->old_blkaddr);
+			// update_hotness_entry(fio->sbi, fio->old_blkaddr, fio->new_blkaddr, he);
+			hm->old_blkaddr = fio->old_blkaddr;
+			INIT_WORK(&hm->work, update_hotness_entry_work);
+			queue_work(wq, &hm->work);
 			hc_list_ptr->upd_blk_cnt++;
 			segment_valid[segno] = 1;
         }
@@ -3546,7 +3554,9 @@ reallocate:
 			// unsigned int new_LWS = fio->sbi->total_writed_block_count;
 			// printk("Calling insert_hotness_entry\n");
 			// printk("%s he is not existed\n", __func__);
-			insert_hotness_entry(fio->sbi, fio->new_blkaddr, he);
+			// insert_hotness_entry(fio->sbi, fio->new_blkaddr, he);
+			INIT_WORK(&hm->work, insert_hotness_entry_work);
+			queue_work(wq, &hm->work);
 			// printk("Return from insert_hotness_entry\n");
 
 			/* 记录 连续写入块 */
