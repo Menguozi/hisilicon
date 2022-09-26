@@ -5,7 +5,9 @@
 #include <linux/workqueue.h>    /* for work queue */
 #include <linux/slab.h>         /* for kmalloc() */
 
-#define _F2FS_DEBUG
+// #define F2FS_DEBUG
+// #define F2FS_CONCURRENT
+// #define F2FS_PTIME
 
 #define N_CLUSTERS 3
 
@@ -18,6 +20,9 @@ extern nid_t last2_ino;
 #define MAX_SEGNO 4*1048576
 extern char segment_valid[MAX_SEGNO];
 extern struct workqueue_struct *wq;
+extern struct kmem_cache *hotness_manage_slab;
+extern struct kmem_cache *hotness_entry_info_slab;
+extern spinlock_t count_lock;
 
 /* 热度定义 */
 struct hotness_entry
@@ -26,9 +31,7 @@ struct hotness_entry
 	unsigned int IRR;/* 最近两次更新间隔时间 */
 	unsigned int LWS;/* 最后一次更新时间 */
 	struct list_head list;
-	#ifdef _F2FS_DEBUG
-		struct hotness_entry_info *hei;
-	#endif
+	// struct hotness_entry_info *hei;
 };
 
 struct hotness_entry_info
@@ -45,7 +48,6 @@ struct hotness_entry_info
 
 	unsigned int segno;
 };
-extern struct kmem_cache *hotness_entry_info_slab;
 
 /* 热度元数据组织 */
 struct hc_list {
@@ -74,9 +76,11 @@ struct hotness_manage {
     struct hotness_entry *he;
 	block_t new_blkaddr;
 	block_t old_blkaddr;
+	struct f2fs_sb_info *sbi;
+	block_t write_count;
 };
 
-int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he);
+int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he, block_t write_count);
 int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t new_blkaddr,  struct hotness_entry *he);
 struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);
 int delete_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);

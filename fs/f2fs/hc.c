@@ -5,6 +5,7 @@
 #include <linux/f2fs_fs.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/timer.h>
 #include <linux/freezer.h>
 #include <linux/sched/signal.h>
 // #include <include/linux/xarray.h>
@@ -17,50 +18,94 @@
 // #include <trace/events/f2fs.h>
 
 static DEFINE_SPINLOCK(list_lock);
+DEFINE_SPINLOCK(count_lock);
 static struct kmem_cache *hotness_entry_slab;
+struct kmem_cache *hotness_manage_slab;
 struct kmem_cache *hotness_entry_info_slab;
 struct hc_list *hc_list_ptr;
 struct workqueue_struct *wq;
 nid_t last_ino;
 char segment_valid[MAX_SEGNO];
-struct workqueue_struct *wq;
 
 /* 热度元数据操作 */
 /* 1、添加 */
 // create
-int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he)
+int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he, block_t write_count)
 {
+	#ifdef F2FS_PTIME
+	struct timespec64 ts_start, ts_end;
+	struct timespec64 ts_delta;
+	ktime_get_boottime_ts64(&ts_start);
+	#endif
+
 	he = f2fs_kmem_cache_alloc(hotness_entry_slab, GFP_NOFS);
 	he->blk_addr = blkaddr;
 	he->IRR = __UINT32_MAX__;
-	// he->LWS = sbi->total_writed_block_count;
+	he->LWS = write_count;
 	hc_list_ptr->count++;
 	f2fs_radix_tree_insert(&hc_list_ptr->iroot, blkaddr, he);
 	spin_lock(&list_lock);
 	list_add_tail_rcu(&he->list, &hc_list_ptr->ilist);
 	spin_unlock(&list_lock);
+
+	#ifdef F2FS_PTIME
+	ktime_get_boottime_ts64(&ts_end);
+	ts_delta = timespec64_sub(ts_end, ts_start);
+	printk("%s: time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
+	#endif
+
 	return 0;
 }
 
+/**
+ * @brief 更新
+ * 
+ * @param sbi 
+ * @param old_blkaddr 
+ * @param new_blkaddr 
+ * @param he 
+ * @return int 
+ */
 int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t new_blkaddr, struct hotness_entry *he)
 {
+	#ifdef F2FS_PTIME
+	struct timespec64 ts_start, ts_end;
+	struct timespec64 ts_delta;
+	ktime_get_boottime_ts64(&ts_start);
+	#endif
+
 	f2fs_radix_tree_insert(&hc_list_ptr->iroot, new_blkaddr, he);
 	radix_tree_delete(&hc_list_ptr->iroot, old_blkaddr);
+
+	#ifdef F2FS_PTIME
+	ktime_get_boottime_ts64(&ts_end);
+	ts_delta = timespec64_sub(ts_end, ts_start);
+	printk("%s: time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
+	#endif
+
 	return 0;
 }
 
 /* 2、查询 */
 struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr)
 {
+	#ifdef F2FS_PTIME
+	struct timespec64 ts_start, ts_end;
+	struct timespec64 ts_delta;
+	ktime_get_boottime_ts64(&ts_start);
+	#endif
+
 	struct hotness_entry *he;
-	if (hc_list_ptr->iroot.xa_head == NULL) goto no_xa_head;
+	if (hc_list_ptr->iroot.xa_head == NULL) return NULL;
 	he = radix_tree_lookup(&hc_list_ptr->iroot, blkaddr);
-	if (he) {
-        return he;
-    } else {
-no_xa_head:
-        return NULL;
-    }
+
+	#ifdef F2FS_PTIME
+	ktime_get_boottime_ts64(&ts_end);
+	ts_delta = timespec64_sub(ts_end, ts_start);
+	printk("%s: time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
+	#endif
+
+	return he;
 }
 
 /* 3、移除 */
@@ -84,8 +129,8 @@ void insert_hotness_entry_work(struct work_struct *work)
 {
 	// printk("In function: %s\n", __FUNCTION__);
 	struct hotness_manage *hm = container_of(work, struct hotness_manage, work);
-	insert_hotness_entry(NULL, hm->new_blkaddr, hm->he);
-	kfree(hm);
+	insert_hotness_entry(NULL, hm->new_blkaddr, hm->he, hm->write_count);
+	kmem_cache_free(hotness_manage_slab, hm);
 }
 
 void update_hotness_entry_work(struct work_struct *work)
@@ -93,13 +138,16 @@ void update_hotness_entry_work(struct work_struct *work)
 	// printk("In function: %s\n", __FUNCTION__);
 	struct hotness_manage *hm = container_of(work, struct hotness_manage, work);
 	update_hotness_entry(NULL, hm->old_blkaddr, hm->new_blkaddr, hm->he);
-	kfree(hm);
+	kmem_cache_free(hotness_manage_slab, hm);
 }
 
 int f2fs_create_hotness_clustering_cache(void)
 {
 	hotness_entry_slab = f2fs_kmem_cache_create("f2fs_hotness_entry", sizeof(struct hotness_entry));
 	if (!hotness_entry_slab)
+		return -ENOMEM;
+	hotness_manage_slab = f2fs_kmem_cache_create("f2fs_hotness_manage", sizeof(struct hotness_manage));
+	if (!hotness_manage_slab)
 		return -ENOMEM;
 	hotness_entry_info_slab = f2fs_kmem_cache_create("f2fs_hotness_entry_info", sizeof(struct hotness_entry_info));
 	if (!hotness_entry_info_slab)
@@ -110,6 +158,7 @@ int f2fs_create_hotness_clustering_cache(void)
 void f2fs_destroy_hotness_clustering_cache(void)
 {
 	kmem_cache_destroy(hotness_entry_slab);
+	kmem_cache_destroy(hotness_manage_slab);
 	kmem_cache_destroy(hotness_entry_info_slab);
 }
 
@@ -132,7 +181,7 @@ static void init_hc_management(struct f2fs_sb_info *sbi)
 
 	hc_list_ptr = &hc_list_var;
 
-	wq = alloc_workqueue("f2fs-hc-workqueue", WQ_UNBOUND | WQ_HIGHPRI, num_online_cpus());
+	wq = alloc_workqueue("f2fs-hc-workqueue", WQ_HIGHPRI | WQ_CPU_INTENSIVE, 512);
 
 	fp = filp_open("/tmp/f2fs_hotness_no", O_RDWR, 0644);
 	if (IS_ERR(fp)) {
@@ -168,7 +217,7 @@ static void init_hc_management(struct f2fs_sb_info *sbi)
 		kernel_read(fp, &he->blk_addr, sizeof(he->blk_addr), &pos);
 		kernel_read(fp, &he->IRR, sizeof(he->IRR), &pos);
 		kernel_read(fp, &he->LWS, sizeof(he->LWS), &pos);
-		insert_hotness_entry(sbi, he->blk_addr, he);
+		insert_hotness_entry(NULL, he->blk_addr, he, count);
 		printk("%u, %u, %u\n", he->blk_addr, he->IRR, he->LWS);
 	}
 
@@ -270,17 +319,17 @@ void save_hotness_entry(struct f2fs_sb_info *sbi)
 
 	// save n_clusters
 	kernel_write(fp, &sbi->n_clusters, sizeof(sbi->n_clusters), &pos);
-	printk("pos = 0x%llx\n", pos);
+	// printk("pos = 0x%llx\n", pos);
 	// save centers
 	for(i = 0; i < sbi->n_clusters; i++) {
 		kernel_write(fp, &sbi->centers[i], sizeof(sbi->centers[i]), &pos);
-		printk("%u, 0x%x\n", sbi->centers[i], sbi->centers[i]);
+		// printk("%u, 0x%x\n", sbi->centers[i], sbi->centers[i]);
 	}
-	printk("pos = 0x%llx\n", pos);
+	// printk("pos = 0x%llx\n", pos);
 	// save total_writed_block_count
 	kernel_write(fp, &sbi->total_writed_block_count, sizeof(sbi->total_writed_block_count), &pos);
-	printk("%u, 0x%x\n", sbi->total_writed_block_count, sbi->total_writed_block_count);
-	printk("pos = 0x%llx\n", pos);
+	// printk("%u, 0x%x\n", sbi->total_writed_block_count, sbi->total_writed_block_count);
+	// printk("pos = 0x%llx\n", pos);
 	
 	rcu_read_lock();
 	list_for_each_entry_rcu(he, &hc_list_ptr->ilist, list){
@@ -289,7 +338,7 @@ void save_hotness_entry(struct f2fs_sb_info *sbi)
 		kernel_write(fp, &he->LWS, sizeof(he->LWS), &pos);
 	}
 	rcu_read_unlock();
-	printk("pos = 0x%llx\n", pos);
+	// printk("pos = 0x%llx\n", pos);
 	
 	filp_close(fp, NULL);
 out:

@@ -3275,10 +3275,6 @@ static int __get_segment_type_4(struct f2fs_io_info *fio)
 {
 	if (fio->type == DATA) {
 		struct inode *inode = fio->page->mapping->host;
-
-		if (fio->sbi->centers_valid && (fio->old_blkaddr != UINT_MAX)) {
-			return kmeans_get_type(fio);
-		}
 		
 		if (S_ISDIR(inode->i_mode))
 			return CURSEG_HOT_DATA;
@@ -3296,10 +3292,6 @@ static int __get_segment_type_6(struct f2fs_io_info *fio)
 {
 	if (fio->type == DATA) {
 		struct inode *inode = fio->page->mapping->host;
-
-		if (fio->sbi->centers_valid && (fio->old_blkaddr != UINT_MAX)) {
-			return kmeans_get_type(fio);
-		}
 
 		if (is_inode_flag_set(inode, FI_ALIGNED_WRITE))
 			return CURSEG_COLD_DATA_PINNED;
@@ -3476,18 +3468,37 @@ static void update_device_state(struct f2fs_io_info *fio)
 static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 {
 	// printk("In do_write_page\n");
-	// unsigned int old_IRR, old_LWS;
-	// int err;
+	int type;
+	struct timespec64 ts_start_total, ts_end_total;
 	struct timespec64 ts_start, ts_end;
 	struct timespec64 ts_delta;
 	unsigned int segno;
-	struct hotness_entry *he;
-	// struct hotness_entry_info *new_hei;
+	struct hotness_entry *he = NULL;
 	struct hotness_manage *hm;
-	int type = __get_segment_type(fio);
+
+	// ktime_get_boottime_ts64(&ts_start_total);
+	/* 温度类型判断 */
+	if (fio->type == DATA && (fio->old_blkaddr != __UINT32_MAX__)) {
+		he = lookup_hotness_entry(fio->sbi, fio->old_blkaddr);
+	}
+	if (he) { // 存在
+		he->IRR = fio->sbi->total_writed_block_count - he->LWS;
+		he->LWS = fio->sbi->total_writed_block_count;
+	}
+	if (he && fio->sbi->centers_valid) {
+		type = kmeans_get_type(fio, he);
+		if (IS_HOT(type))
+			fio->temp = HOT;
+		else if (IS_WARM(type))
+			fio->temp = WARM;
+		else
+			fio->temp = COLD;
+	} else {
+		type = __get_segment_type(fio);
+	}
+
 	bool keep_order = (f2fs_lfs_mode(fio->sbi) && type == CURSEG_COLD_DATA);
 
-	ktime_get_boottime_ts64(&ts_start);
 	if (keep_order)
 		down_read(&fio->sbi->io_order_lock);
 reallocate:
@@ -3506,42 +3517,47 @@ reallocate:
 		goto reallocate;
 	}
 
-	// printk("type = %u\n", fio->type);
+	// printk("%s type = %d temp = %d\n", __func__, fio->type, fio->temp);
 	// printk("fio->old_blkaddr = %u, fio->new_blkaddr = %u\n", fio->old_blkaddr, fio->new_blkaddr);
+	/* 热度更新维护 */
+	#ifndef F2FS_DEBUG
+	if ((fio->type == DATA) && (fio->temp == WARM)) {
+	#else
 	if (fio->type == DATA) {
-	// if ((fio->type == DATA) && (fio->temp == WARM)) {
-		// printk("%s type = %d temp = %d\n", __func__, fio->type, fio->temp);
-       /*  
-        1、累计写入块计数加一：total_writed_block_count++
-        2、查询old_blkaddr对应的热度元数据 
-        */
+	#endif
+		#ifdef F2FS_CONCURRENT
+		spin_lock(&count_lock);
+		#endif
 		fio->sbi->total_writed_block_count++;
-		// printk("Calling lookup_hotness_entry\n");
-		he = lookup_hotness_entry(fio->sbi, fio->old_blkaddr);
-		// printk("Finish lookup_hotness_entry\n");
+		#ifdef F2FS_CONCURRENT
+		spin_unlock(&count_lock);
+		#endif
+		
 		segno = GET_SEGNO(fio->sbi, fio->new_blkaddr);
-		// new_hei = f2fs_kmem_cache_alloc(hotness_entry_info_slab, GFP_NOFS);
-		// new_hei->ino = fio->ino;
-		// new_hei->type = fio->type;
-		// new_hei->temp = fio->temp;
-		// new_hei->io_type = fio->io_type;
-		// new_hei->nid = sum->nid;
-		// new_hei->ofs_in_node = sum->ofs_in_node;
-		// // new_hei->segno = fio->new_blkaddr >> 9;
-		// new_hei->segno = segno;
-		hm = kmalloc(sizeof(struct hotness_manage), GFP_KERNEL);
+		hm = f2fs_kmem_cache_alloc(hotness_manage_slab, GFP_KERNEL);
 		hm->he = he;
 		hm->new_blkaddr = fio->new_blkaddr;
         if (he) { // 存在
 			// printk("%s he existed\n", __func__);
-			he->IRR = fio->sbi->total_writed_block_count - he->IRR;
-			// he->LWS = fio->sbi->total_writed_block_count;
-			// f2fs_radix_tree_insert(&hc_list_ptr->iroot, fio->new_blkaddr, he);
-			// radix_tree_delete(&hc_list_ptr->iroot, fio->old_blkaddr);
-			// update_hotness_entry(fio->sbi, fio->old_blkaddr, fio->new_blkaddr, he);
+			he->blk_addr = fio->new_blkaddr;
 			hm->old_blkaddr = fio->old_blkaddr;
+			#ifdef F2FS_PTIME
+			ktime_get_boottime_ts64(&ts_start);
+			#endif
 			INIT_WORK(&hm->work, update_hotness_entry_work);
+			#ifdef F2FS_PTIME
+			ktime_get_boottime_ts64(&ts_end);
+			ts_delta = timespec64_sub(ts_end, ts_start);
+			printk("%s: update_hotness_entry_work INIT_WORK time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
+			ktime_get_boottime_ts64(&ts_start);
+			#endif
 			queue_work(wq, &hm->work);
+			#ifdef F2FS_PTIME
+			ktime_get_boottime_ts64(&ts_end);
+			ts_delta = timespec64_sub(ts_end, ts_start);
+			printk("%s: update_hotness_entry_work queue_work time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
+			// printk("%s: update_hotness_entry_work time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
+			#endif
 			hc_list_ptr->upd_blk_cnt++;
 			segment_valid[segno] = 1;
         }
@@ -3550,17 +3566,21 @@ reallocate:
             1、创建新热度元数据项
             2、设置热度：LWS = total_writed_block_count;
             3、添加为new_blkaddr热度元数据 */
-			// unsigned int new_IRR = UINT_MAX;
-			// unsigned int new_LWS = fio->sbi->total_writed_block_count;
-			// printk("Calling insert_hotness_entry\n");
 			// printk("%s he is not existed\n", __func__);
 			// insert_hotness_entry(fio->sbi, fio->new_blkaddr, he);
+			hm->write_count = fio->sbi->total_writed_block_count;
+			#ifdef F2FS_PTIME
+			ktime_get_boottime_ts64(&ts_start);
+			#endif
 			INIT_WORK(&hm->work, insert_hotness_entry_work);
 			queue_work(wq, &hm->work);
-			// printk("Return from insert_hotness_entry\n");
+			#ifdef F2FS_PTIME
+			ktime_get_boottime_ts64(&ts_end);
+			ts_delta = timespec64_sub(ts_end, ts_start);
+			printk("%s: insert_hotness_entry_work time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
+			#endif
 
 			/* 记录 连续写入块 */
-			// hc_list_ptr->successive_write_cnt++;
 			hc_list_ptr->new_blk_cnt++;
 			if (last_ino != __UINT32_MAX__) {
 				if (fio->ino == last_ino) {
@@ -3570,8 +3590,8 @@ reallocate:
 			last_ino = fio->ino;
         }
     }
-	ktime_get_boottime_ts64(&ts_end);
-	ts_delta = timespec64_sub(ts_end, ts_start);
+	// ktime_get_boottime_ts64(&ts_end_total);
+	// ts_delta = timespec64_sub(ts_end_total, ts_start_total);
 	// printk("%s hotness management time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
 
 	update_device_state(fio);

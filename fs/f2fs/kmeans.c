@@ -100,17 +100,11 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
     return 0;
 }
 
-int kmeans_get_type(struct f2fs_io_info *fio)
+int kmeans_get_type(struct f2fs_io_info *fio, struct hotness_entry *he)
 {
     unsigned int type;
-    struct hotness_entry *he = lookup_hotness_entry(fio->sbi, fio->old_blkaddr);
-
-    printk("Doing kmeans_get_type...\n");
+    // printk("Doing kmeans_get_type...\n");
     
-    if (he) {
-        printk("fail to lookup hotness_entry\n");
-        return -1;
-    }
     if(fio->sbi->n_clusters == 3) {
         type = MIN_3(diff(he->IRR, fio->sbi->centers[0]),
                      diff(he->IRR, fio->sbi->centers[1]),
