@@ -3481,7 +3481,7 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 	if (fio->type == DATA && (fio->old_blkaddr != __UINT32_MAX__)) {
 		he = lookup_hotness_entry(fio->sbi, fio->old_blkaddr);
 	}
-	if (he) { // 存在
+	if (he) { // 存在，还要加锁的
 		he->IRR = fio->sbi->total_writed_block_count - he->LWS;
 		he->LWS = fio->sbi->total_writed_block_count;
 	}
@@ -3538,7 +3538,7 @@ reallocate:
 		hm->he = he;
 		hm->new_blkaddr = fio->new_blkaddr;
         if (he) { // 存在
-			// printk("%s he existed\n", __func__);
+			// printk("%s: he existed\n", __func__);
 			he->blk_addr = fio->new_blkaddr;
 			hm->old_blkaddr = fio->old_blkaddr;
 			#ifdef F2FS_PTIME
@@ -3566,7 +3566,7 @@ reallocate:
             1、创建新热度元数据项
             2、设置热度：LWS = total_writed_block_count;
             3、添加为new_blkaddr热度元数据 */
-			// printk("%s he is not existed\n", __func__);
+			// printk("%s: he is not existed\n", __func__);
 			// insert_hotness_entry(fio->sbi, fio->new_blkaddr, he);
 			hm->write_count = fio->sbi->total_writed_block_count;
 			#ifdef F2FS_PTIME
@@ -3574,6 +3574,14 @@ reallocate:
 			#endif
 			INIT_WORK(&hm->work, insert_hotness_entry_work);
 			queue_work(wq, &hm->work);
+			if (hc_list_ptr->count >= DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD) {
+				// spin_lock(&shrink_lock);
+				// shrink_hotness_entry();
+				// spin_unlock(&shrink_lock);	
+				hm = f2fs_kmem_cache_alloc(hotness_manage_slab, GFP_KERNEL);
+				INIT_WORK(&hm->work, shrink_hotness_entry_work);
+				queue_work(wq, &hm->work);
+			}
 			#ifdef F2FS_PTIME
 			ktime_get_boottime_ts64(&ts_end);
 			ts_delta = timespec64_sub(ts_end, ts_start);

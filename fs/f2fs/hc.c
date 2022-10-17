@@ -8,6 +8,7 @@
 #include <linux/timer.h>
 #include <linux/freezer.h>
 #include <linux/sched/signal.h>
+#include <linux/slab_def.h>
 // #include <include/linux/xarray.h>
 
 #include "f2fs.h"
@@ -19,6 +20,7 @@
 
 static DEFINE_SPINLOCK(list_lock);
 DEFINE_SPINLOCK(count_lock);
+static DEFINE_SPINLOCK(shrink_lock);
 static struct kmem_cache *hotness_entry_slab;
 struct kmem_cache *hotness_manage_slab;
 struct kmem_cache *hotness_entry_info_slab;
@@ -54,6 +56,8 @@ int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotne
 	printk("%s: time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
 	#endif
 
+	// printk("%s, slab object_size is %u, slab size is %u, kmem_cache_size(hotness_entry_slab) = %u\n", __func__, hotness_entry_slab->object_size, hotness_entry_slab->size, kmem_cache_size(hotness_entry_slab));
+
 	return 0;
 }
 
@@ -76,6 +80,10 @@ int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t 
 
 	f2fs_radix_tree_insert(&hc_list_ptr->iroot, new_blkaddr, he);
 	radix_tree_delete(&hc_list_ptr->iroot, old_blkaddr);
+	spin_lock(&list_lock);
+	list_del_rcu(&he->list);
+	list_add_tail_rcu(&he->list, &hc_list_ptr->ilist);
+	spin_unlock(&list_lock);
 
 	#ifdef F2FS_PTIME
 	ktime_get_boottime_ts64(&ts_end);
@@ -125,6 +133,32 @@ int delete_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr)
 	return -1;
 }
 
+void shrink_hotness_entry(void) {
+	struct hotness_entry *he, *he_next;
+	unsigned int num;
+	block_t blkaddr;
+	printk("Calling function %s\n", __func__);
+	spin_lock(&list_lock);
+	if (hc_list_ptr->count < DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD) {
+		spin_unlock(&list_lock);
+		return;
+	}
+	he_next = list_first_entry(&hc_list_ptr->ilist, struct hotness_entry, list);
+	for (num = 0; num < DEF_HC_HOTNESS_ENTRY_SHRINK_NUM && !list_entry_is_head(he_next, &hc_list_ptr->ilist, list); num++) {
+		he = he_next;
+		blkaddr = he->blk_addr;
+		he_next = list_next_entry(he, list);
+		// printk("In function %s, remove hotness entry whose blkaddr = %u\n", __func__, blkaddr);
+		radix_tree_delete(&hc_list_ptr->iroot, blkaddr);
+		list_del_rcu(&he->list);
+		// synchronize_rcu();
+		kmem_cache_free(hotness_entry_slab, he);
+		hc_list_ptr->count--;
+	}
+	hc_list_ptr->rmv_blk_cnt += num;
+	spin_unlock(&list_lock);
+}
+
 void insert_hotness_entry_work(struct work_struct *work)
 {
 	// printk("In function: %s\n", __FUNCTION__);
@@ -138,6 +172,13 @@ void update_hotness_entry_work(struct work_struct *work)
 	// printk("In function: %s\n", __FUNCTION__);
 	struct hotness_manage *hm = container_of(work, struct hotness_manage, work);
 	update_hotness_entry(NULL, hm->old_blkaddr, hm->new_blkaddr, hm->he);
+	kmem_cache_free(hotness_manage_slab, hm);
+}
+
+void shrink_hotness_entry_work(struct work_struct *work)
+{
+	struct hotness_manage *hm = container_of(work, struct hotness_manage, work);
+	shrink_hotness_entry();
 	kmem_cache_free(hotness_manage_slab, hm);
 }
 
@@ -314,6 +355,7 @@ void save_hotness_entry(struct f2fs_sb_info *sbi)
 
 	printk("In save_hotness_entry");
 
+	// if (!sbi->centers_valid) goto out;
 	fp = filp_open("/tmp/f2fs_hotness", O_RDWR|O_CREAT, 0644);
 	if (IS_ERR(fp)) goto out;
 
@@ -323,12 +365,12 @@ void save_hotness_entry(struct f2fs_sb_info *sbi)
 	// save centers
 	for(i = 0; i < sbi->n_clusters; i++) {
 		kernel_write(fp, &sbi->centers[i], sizeof(sbi->centers[i]), &pos);
-		// printk("%u, 0x%x\n", sbi->centers[i], sbi->centers[i]);
+		printk("%u, 0x%x\n", sbi->centers[i], sbi->centers[i]);
 	}
 	// printk("pos = 0x%llx\n", pos);
 	// save total_writed_block_count
 	kernel_write(fp, &sbi->total_writed_block_count, sizeof(sbi->total_writed_block_count), &pos);
-	// printk("%u, 0x%x\n", sbi->total_writed_block_count, sbi->total_writed_block_count);
+	printk("%u, 0x%x\n", sbi->total_writed_block_count, sbi->total_writed_block_count);
 	// printk("pos = 0x%llx\n", pos);
 	
 	rcu_read_lock();
@@ -354,14 +396,16 @@ void release_hotness_entry(struct f2fs_sb_info *sbi)
 	struct radix_tree_iter iter;
 	void __rcu **slot;
 
-	printk("In release_hotness_entry");
+	printk("In release_hotness_entry\n");
 
-	// rcu_read_lock();
+	spin_lock(&list_lock);
 	list_for_each_entry_safe(he, tmp, &hc_list_ptr->ilist, list) {
-		list_del(&he->list);
+		list_del_rcu(&he->list);
+		// synchronize_rcu();
 		kmem_cache_free(hotness_entry_slab, he);
 		hc_list_ptr->count--;
 	}
+	spin_unlock(&list_lock);
 
 	radix_tree_for_each_slot(slot, &hc_list_ptr->iroot, &iter, 0) {
 		radix_tree_delete(&hc_list_ptr->iroot, iter.index);

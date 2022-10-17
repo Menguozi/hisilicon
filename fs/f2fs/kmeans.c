@@ -32,18 +32,25 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
     long long *mass_center = kmalloc(sizeof(long long) * center_num * 3, GFP_KERNEL); //存放质心，平均值，集合元素数
     int data_num = 0;
     int i, flag, loop_count, j;
-    if (hc_list_ptr->count > 1000000)
+    if (hc_list_ptr->count > 1000000) {
+        printk("In function %s, hc_list_ptr->count is too large.\n", __func__);
         return -1;
+    }
     
     printk("Doing f2fs_hc...\n");
 
-    list_for_each_entry(he, &hc_list_ptr->ilist, list)
+    rcu_read_lock();
+    list_for_each_entry_rcu(he, &hc_list_ptr->ilist, list)
     {
         if (he->IRR != UINT_MAX)
             data[data_num++] = he->IRR;
         // printk("IRR = %u", he->IRR);
     }
-    if (data_num == 0) return -1;
+    rcu_read_unlock();
+    if (data_num == 0) {
+        printk("Function %s return invalid.\n", __func__);
+        return -1;
+    }
     // if (sbi->centers_valid) {
     //     for (i = 0; i < center_num; ++i) {
     //         mass_center[i] = (long long)sbi->centers[i];
@@ -90,11 +97,14 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
     for (i = 0; i < center_num; ++i)
         sbi->centers[i] = (unsigned int)mass_center[i * 3];
     bubble_sort(sbi->centers, center_num);
-    printk("centers: ");
-    for (i = 0; i < center_num; i++) {
-        printk("%u ", sbi->centers[i]);
-    }
-    printk("\n");
+
+    if (center_num == 3) 
+        printk("centers: %u, %u, %u\n", sbi->centers[0], sbi->centers[1], sbi->centers[2]);
+    else if (center_num == 2)
+        printk("centers: %u, %u\n", sbi->centers[0], sbi->centers[1]);
+    else
+        printk("center num is error!\n");
+
     kfree(data);
     kfree(mass_center);
     return 0;

@@ -581,6 +581,7 @@ static int stat_show(struct seq_file *s, void *v)
 			upd_seg_cnt += segment_valid[i];
 		}
 		seq_printf(s, "upd_seg_cnt = %u\n", upd_seg_cnt);
+		seq_printf(s, "rmv_blk_cnt = %u\n", hc_list_ptr->rmv_blk_cnt);
 		if(si->sbi->centers_valid) {
 			for (j = 0; j < si->sbi->n_clusters; ++j) {
 				seq_printf(s, "centers[%u] = %u, ", j, si->sbi->centers[j]);
