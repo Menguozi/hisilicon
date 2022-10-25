@@ -8,16 +8,26 @@
 #define F2FS_DEBUG
 // #define F2FS_CONCURRENT
 // #define F2FS_PTIME
+#define F2FS_PTIME_HC
 
-#define N_CLUSTERS 3
-
-#define DEF_HC_THREAD_MIN_SLEEP_TIME	3000	/* milliseconds */
+#define DEF_HC_THREAD_MIN_SLEEP_TIME	3000000	/* milliseconds */
 #define DEF_HC_THREAD_MAX_SLEEP_TIME	60000
 #define DEF_HC_THREAD_NOHC_SLEEP_TIME	300000	/* wait 5 min */
 
 #define DEF_HC_HOTNESS_ENTRY_MAX_NUM 160000
 #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 150000
 #define DEF_HC_HOTNESS_ENTRY_SHRINK_NUM 10000
+
+#define THRESHOLD_HOT_WARM 100
+#define THRESHOLD_WARM_COLD 1000
+
+enum {
+	TYPE_STRATEGY_THRESHOLD = 0, 
+	TYPE_STRATEGY_KMEANS
+};
+
+#define TYPE_STRATEGY TYPE_STRATEGY_THRESHOLD
+#define N_CLUSTERS 3
 
 extern nid_t last_ino;
 extern nid_t last2_ino;
@@ -96,5 +106,6 @@ void shrink_hotness_entry_work(struct work_struct *work);
 void save_hotness_entry(struct f2fs_sb_info *sbi);
 void load_hotness_entry(struct f2fs_sb_info *sbi);
 void release_hotness_entry(struct f2fs_sb_info *sbi);
+unsigned int get_type_threshold(struct hotness_entry *he);
 
 #endif

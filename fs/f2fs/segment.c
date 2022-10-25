@@ -3485,8 +3485,14 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 		he->IRR = fio->sbi->total_writed_block_count - he->LWS;
 		he->LWS = fio->sbi->total_writed_block_count;
 	}
+	#if TYPE_STRATEGY == TYPE_STRATEGY_THRESHOLD
+	if (he) {
+		type = get_type_threshold(he);
+		// printk("type = %u\n", type);
+	#elif TYPE_STRATEGY == TYPE_STRATEGY_KMEANS
 	if (he && fio->sbi->centers_valid) {
 		type = kmeans_get_type(fio, he);
+	#endif
 		if (IS_HOT(type))
 			fio->temp = HOT;
 		else if (IS_WARM(type))

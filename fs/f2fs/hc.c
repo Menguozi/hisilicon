@@ -417,3 +417,9 @@ void release_hotness_entry(struct f2fs_sb_info *sbi)
     destroy_workqueue(wq);
     printk("Work queue exit: %s\n", __FUNCTION__);
 }
+
+unsigned int get_type_threshold(struct hotness_entry *he)
+{
+	unsigned int IRR = he->IRR;
+	return (IRR < THRESHOLD_HOT_WARM) ? CURSEG_HOT_DATA : ((IRR < THRESHOLD_WARM_COLD) ? CURSEG_WARM_DATA : CURSEG_COLD_DATA);
+}

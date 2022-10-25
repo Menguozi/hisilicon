@@ -22,11 +22,14 @@ static void bubble_sort(unsigned int *x, int num);
 
 int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
 {
-    /*
-    1、对传入的热度数据进行k-means聚类
-    2、聚类结果保存在f2fs_sb_info centers
-    */
     struct hotness_entry *he;
+    
+	#ifdef F2FS_PTIME_HC
+	struct timespec64 ts_start, ts_end;
+	struct timespec64 ts_delta;
+	ktime_get_boottime_ts64(&ts_start);
+	#endif
+
     int center_num = sbi->n_clusters;
     unsigned int *data = kmalloc(sizeof(unsigned int) * hc_list_ptr->count, GFP_KERNEL);
     long long *mass_center = kmalloc(sizeof(long long) * center_num * 3, GFP_KERNEL); //存放质心，平均值，集合元素数
@@ -107,6 +110,13 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
 
     kfree(data);
     kfree(mass_center);
+
+	#ifdef F2FS_PTIME_HC
+	ktime_get_boottime_ts64(&ts_end);
+	ts_delta = timespec64_sub(ts_end, ts_start);
+	printk("%s: time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
+	#endif
+    
     return 0;
 }
 
