@@ -214,6 +214,7 @@ static void init_hc_management(struct f2fs_sb_info *sbi)
 	static struct hc_list hc_list_var = {
 		.ilist = LIST_HEAD_INIT(hc_list_var.ilist),
 		.iroot = RADIX_TREE_INIT(hc_list_var.iroot, GFP_NOFS),
+		.IRR_min = {__UINT32_MAX__, __UINT32_MAX__, __UINT32_MAX__},
 	};
 	unsigned int n_clusters;
 	unsigned int i;

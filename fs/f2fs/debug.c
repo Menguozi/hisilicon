@@ -559,12 +559,12 @@ static int stat_show(struct seq_file *s, void *v)
 		// for (blk_addr = 0; blk_addr < MAIN_SEGS(si->sbi) * si->sbi->blocks_per_seg; blk_addr++) {}
 		// struct list_head *p;
 		seq_printf(s, "\n-------------------\n");
-		list_for_each_entry(he, &hc_list_ptr->ilist, list) {
-			seq_printf(s, "blk_addr = %u, IRR = %u, LWS = %u, ", he->blk_addr, he->IRR, he->LWS);
-			// if (he->hei) 
-				// seq_printf(s, "ino = %u, segno = %u, type = %u, temp = %u, io_type = %u, nid = %u, ofs_in_node = %u", he->hei->ino, he->hei->segno, he->hei->type, he->hei->temp, he->hei->io_type, he->hei->nid, he->hei->ofs_in_node);
-			seq_printf(s, "\n");
-		}
+		// list_for_each_entry(he, &hc_list_ptr->ilist, list) {
+		// 	seq_printf(s, "blk_addr = %u, IRR = %u, LWS = %u, ", he->blk_addr, he->IRR, he->LWS);
+		// 	// if (he->hei) 
+		// 		// seq_printf(s, "ino = %u, segno = %u, type = %u, temp = %u, io_type = %u, nid = %u, ofs_in_node = %u", he->hei->ino, he->hei->segno, he->hei->type, he->hei->temp, he->hei->io_type, he->hei->nid, he->hei->ofs_in_node);
+		// 	seq_printf(s, "\n");
+		// }
 		// rcu_read_lock();
 		// list_for_each_entry_rcu(he, &hc_list_ptr->ilist, list) {
 		// 	seq_printf(s, "blk_addr = %u, IRR = %u, LWS = %u, ", he->blk_addr, he->IRR, he->LWS);
@@ -588,10 +588,9 @@ static int stat_show(struct seq_file *s, void *v)
 			}
 			seq_printf(s, "\n");
 		}
-		// list_for_each(p, &hc_list_ptr->ilist) {
-		// 	he = list_entry(p, struct hotness_entry, list);
-		// 	seq_printf("...");
-		// }
+		seq_printf(s, "hot : count = %u, IRR_min = %u, IRR_max = %u\n", hc_list_ptr->counts[HOT], hc_list_ptr->IRR_min[HOT], hc_list_ptr->IRR_max[HOT]);
+		seq_printf(s, "warm: count = %u, IRR_min = %u, IRR_max = %u\n", hc_list_ptr->counts[WARM], hc_list_ptr->IRR_min[WARM], hc_list_ptr->IRR_max[WARM]);
+		seq_printf(s, "cold: count = %u, IRR_min = %u, IRR_max = %u\n", hc_list_ptr->counts[COLD], hc_list_ptr->IRR_min[COLD], hc_list_ptr->IRR_max[COLD]);
 	}
 	mutex_unlock(&f2fs_stat_mutex);
 	return 0;

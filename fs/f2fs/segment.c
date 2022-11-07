@@ -3485,20 +3485,23 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 		he->IRR = fio->sbi->total_writed_block_count - he->LWS;
 		he->LWS = fio->sbi->total_writed_block_count;
 	}
-	#if TYPE_STRATEGY == TYPE_STRATEGY_THRESHOLD
-	if (he) {
-		type = get_type_threshold(he);
-		// printk("type = %u\n", type);
-	#elif TYPE_STRATEGY == TYPE_STRATEGY_KMEANS
+	// #if TYPE_STRATEGY == TYPE_STRATEGY_THRESHOLD
+	// if (he) {
+	// 	type = get_type_threshold(he);
+	// #elif TYPE_STRATEGY == TYPE_STRATEGY_KMEANS
 	if (he && fio->sbi->centers_valid) {
 		type = kmeans_get_type(fio, he);
-	#endif
+	// #endif
 		if (IS_HOT(type))
 			fio->temp = HOT;
 		else if (IS_WARM(type))
 			fio->temp = WARM;
 		else
 			fio->temp = COLD;
+		enum temp_type temp = fio->temp;
+		hc_list_ptr->counts[temp]++;
+		hc_list_ptr->IRR_min[temp] = MIN(hc_list_ptr->IRR_min[temp], he->IRR);
+		hc_list_ptr->IRR_max[temp] = MAX(hc_list_ptr->IRR_max[temp], he->IRR);
 	} else {
 		type = __get_segment_type(fio);
 	}

@@ -5,29 +5,34 @@
 #include <linux/workqueue.h>    /* for work queue */
 #include <linux/slab.h>         /* for kmalloc() */
 
-#define F2FS_DEBUG
+// #define F2FS_DEBUG
 // #define F2FS_CONCURRENT
 // #define F2FS_PTIME
 #define F2FS_PTIME_HC
 
-#define DEF_HC_THREAD_MIN_SLEEP_TIME	3000000	/* milliseconds */
+#define DEF_HC_THREAD_MIN_SLEEP_TIME	3000	/* milliseconds */
 #define DEF_HC_THREAD_MAX_SLEEP_TIME	60000
 #define DEF_HC_THREAD_NOHC_SLEEP_TIME	300000	/* wait 5 min */
 
-#define DEF_HC_HOTNESS_ENTRY_MAX_NUM 160000
-#define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 150000
+#define DEF_HC_HOTNESS_ENTRY_MAX_NUM 16000
+// #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 15000
+#define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD __UINT32_MAX__
 #define DEF_HC_HOTNESS_ENTRY_SHRINK_NUM 10000
 
-#define THRESHOLD_HOT_WARM 100
-#define THRESHOLD_WARM_COLD 1000
+#define THRESHOLD_HOT_WARM 29500
+#define THRESHOLD_WARM_COLD 30000
 
 enum {
-	TYPE_STRATEGY_THRESHOLD = 0, 
-	TYPE_STRATEGY_KMEANS
+	TYPE_STRATEGY_KMEANS = 0,
+	TYPE_STRATEGY_THRESHOLD
 };
 
-#define TYPE_STRATEGY TYPE_STRATEGY_THRESHOLD
+#define TYPE_STRATEGY TYPE_STRATEGY_KMEANS
 #define N_CLUSTERS 3
+#define TEMP_TYPE_NUM 3
+
+#define MIN(a, b) ((a) < (b)) ? a : b
+#define MAX(a, b) ((a) < (b)) ? b : a
 
 extern nid_t last_ino;
 extern nid_t last2_ino;
@@ -72,6 +77,20 @@ struct hc_list {
 	unsigned int new_blk_compress_cnt;
 	unsigned int upd_blk_cnt;
 	unsigned int rmv_blk_cnt;
+
+	// 记录3种温度类别的一些信息
+	// unsigned int hot_count;
+	// unsigned int hot_IRR_min;
+	// unsigned int hot_IRR_max;
+	// unsigned int warm_count;
+	// unsigned int warm_IRR_min;
+	// unsigned int warm_IRR_max;
+	// unsigned int cold_count;
+	// unsigned int cold_IRR_min;
+	// unsigned int cold_IRR_max;
+	unsigned int counts[TEMP_TYPE_NUM];
+	unsigned int IRR_min[TEMP_TYPE_NUM];
+	unsigned int IRR_max[TEMP_TYPE_NUM];
 };
 extern struct hc_list *hc_list_ptr;
 
