@@ -223,7 +223,9 @@ static void init_hc_management(struct f2fs_sb_info *sbi)
 
 	hc_list_ptr = &hc_list_var;
 
-	wq = alloc_workqueue("f2fs-hc-workqueue", WQ_HIGHPRI | WQ_CPU_INTENSIVE, 512);
+	const unsigned int onlinecpus = num_possible_cpus();
+	// wq = alloc_workqueue("f2fs-hc-workqueue", WQ_HIGHPRI | WQ_CPU_INTENSIVE, 512);
+	wq = alloc_workqueue("f2fs-hc-workqueue", WQ_UNBOUND | WQ_HIGHPRI, onlinecpus + onlinecpus / 4);
 
 	fp = filp_open("/tmp/f2fs_hotness_no", O_RDWR, 0644);
 	if (IS_ERR(fp)) {
