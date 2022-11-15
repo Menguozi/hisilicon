@@ -3529,6 +3529,7 @@ reallocate:
 	// printk("%s type = %d temp = %d\n", __func__, fio->type, fio->temp);
 	// printk("fio->old_blkaddr = %u, fio->new_blkaddr = %u\n", fio->old_blkaddr, fio->new_blkaddr);
 	/* 热度更新维护 */
+	#if 1
 	#ifndef F2FS_DEBUG
 	if ((fio->type == DATA) && (fio->temp == WARM)) {
 	#else
@@ -3560,7 +3561,9 @@ reallocate:
 			printk("%s: update_hotness_entry_work INIT_WORK time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
 			ktime_get_boottime_ts64(&ts_start);
 			#endif
+			// printk("======================= %s: 1 ==========================\n", __func__);
 			queue_work(wq, &hm->work);
+			// printk("======================= %s: 2 ==========================\n", __func__);
 			#ifdef F2FS_PTIME
 			ktime_get_boottime_ts64(&ts_end);
 			ts_delta = timespec64_sub(ts_end, ts_start);
@@ -3610,6 +3613,7 @@ reallocate:
 	// ktime_get_boottime_ts64(&ts_end_total);
 	// ts_delta = timespec64_sub(ts_end_total, ts_start_total);
 	// printk("%s hotness management time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
+	#endif
 
 	update_device_state(fio);
 

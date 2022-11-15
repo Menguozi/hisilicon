@@ -19,6 +19,7 @@
 // #include <trace/events/f2fs.h>
 
 static DEFINE_SPINLOCK(list_lock);
+static DEFINE_MUTEX(list_mutex);
 DEFINE_SPINLOCK(count_lock);
 static DEFINE_SPINLOCK(shrink_lock);
 static struct kmem_cache *hotness_entry_slab;
@@ -46,9 +47,11 @@ int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotne
 	he->LWS = write_count;
 	hc_list_ptr->count++;
 	f2fs_radix_tree_insert(&hc_list_ptr->iroot, blkaddr, he);
-	spin_lock(&list_lock);
+	// spin_lock(&list_lock);
+	// mutex_lock(&list_mutex);
 	list_add_tail_rcu(&he->list, &hc_list_ptr->ilist);
-	spin_unlock(&list_lock);
+	// spin_unlock(&list_lock);
+	// mutex_unlock(&list_mutex);
 
 	#ifdef F2FS_PTIME
 	ktime_get_boottime_ts64(&ts_end);
@@ -80,10 +83,12 @@ int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t 
 
 	f2fs_radix_tree_insert(&hc_list_ptr->iroot, new_blkaddr, he);
 	radix_tree_delete(&hc_list_ptr->iroot, old_blkaddr);
-	spin_lock(&list_lock);
+	// spin_lock(&list_lock);
+	// mutex_lock(&list_mutex);
 	list_del_rcu(&he->list);
 	list_add_tail_rcu(&he->list, &hc_list_ptr->ilist);
-	spin_unlock(&list_lock);
+	// spin_unlock(&list_lock);
+	// mutex_unlock(&list_mutex);
 
 	#ifdef F2FS_PTIME
 	ktime_get_boottime_ts64(&ts_end);
@@ -124,9 +129,11 @@ int delete_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr)
 	if (he) {
 		hc_list_ptr->count--;
 		radix_tree_delete(&hc_list_ptr->iroot, he->blk_addr);
-		spin_lock(&list_lock);
+		// spin_lock(&list_lock);
+		// mutex_lock(&list_mutex);
 		list_del_rcu(&he->list);
-		spin_unlock(&list_lock);
+		// spin_unlock(&list_lock);
+		// mutex_unlock(&list_mutex);
 		kmem_cache_free(hotness_entry_slab, he);
 		return 0;
 	}
@@ -138,9 +145,11 @@ void shrink_hotness_entry(void) {
 	unsigned int num;
 	block_t blkaddr;
 	printk("Calling function %s\n", __func__);
-	spin_lock(&list_lock);
+	// spin_lock(&list_lock);
+	mutex_lock(&list_mutex);
 	if (hc_list_ptr->count < DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD) {
-		spin_unlock(&list_lock);
+		// spin_unlock(&list_lock);
+		mutex_unlock(&list_mutex);
 		return;
 	}
 	he_next = list_first_entry(&hc_list_ptr->ilist, struct hotness_entry, list);
@@ -156,7 +165,8 @@ void shrink_hotness_entry(void) {
 		hc_list_ptr->count--;
 	}
 	hc_list_ptr->rmv_blk_cnt += num;
-	spin_unlock(&list_lock);
+	// spin_unlock(&list_lock);
+	mutex_unlock(&list_mutex);
 }
 
 void insert_hotness_entry_work(struct work_struct *work)
@@ -198,6 +208,7 @@ int f2fs_create_hotness_clustering_cache(void)
 
 void f2fs_destroy_hotness_clustering_cache(void)
 {
+	printk("In function %s\n", __func__);
 	kmem_cache_destroy(hotness_entry_slab);
 	kmem_cache_destroy(hotness_manage_slab);
 	kmem_cache_destroy(hotness_entry_info_slab);
@@ -225,7 +236,8 @@ static void init_hc_management(struct f2fs_sb_info *sbi)
 
 	const unsigned int onlinecpus = num_possible_cpus();
 	// wq = alloc_workqueue("f2fs-hc-workqueue", WQ_HIGHPRI | WQ_CPU_INTENSIVE, 512);
-	wq = alloc_workqueue("f2fs-hc-workqueue", WQ_UNBOUND | WQ_HIGHPRI, onlinecpus + onlinecpus / 4);
+	// wq = alloc_workqueue("f2fs-hc-workqueue", WQ_UNBOUND | WQ_HIGHPRI, onlinecpus + onlinecpus / 4);
+	wq = alloc_workqueue("f2fs-hc-workqueue", WQ_UNBOUND | WQ_HIGHPRI, onlinecpus / 4);
 
 	fp = filp_open("/tmp/f2fs_hotness_no", O_RDWR, 0644);
 	if (IS_ERR(fp)) {
@@ -401,24 +413,37 @@ void release_hotness_entry(struct f2fs_sb_info *sbi)
 
 	printk("In release_hotness_entry\n");
 
-	spin_lock(&list_lock);
+    // flush_workqueue(wq);
+    destroy_workqueue(wq);
+    printk("Work queue exit: %s\n", __FUNCTION__);
+
+	printk("----------- 1 -----------\n");
+	if (sbi->centers) kfree(sbi->centers);
+
+	printk("----------- 2 -----------\n");
+	printk("hc_list_ptr in 0x%p\n", hc_list_ptr);
+	printk("count = %u\n", hc_list_ptr->count);
+	printk("----------- 2a -----------\n");
+	if (hc_list_ptr->count == 0) return;
+	printk("----------- 2b -----------\n");
+	// spin_lock(&list_lock);
+	// mutex_lock(&list_mutex);
 	list_for_each_entry_safe(he, tmp, &hc_list_ptr->ilist, list) {
+		printk("he in 0x%p\n", he);
 		list_del_rcu(&he->list);
 		// synchronize_rcu();
 		kmem_cache_free(hotness_entry_slab, he);
 		hc_list_ptr->count--;
 	}
-	spin_unlock(&list_lock);
+	// spin_unlock(&list_lock);
+	// mutex_unlock(&list_mutex);
 
+	printk("----------- 3 -----------\n");
 	radix_tree_for_each_slot(slot, &hc_list_ptr->iroot, &iter, 0) {
 		radix_tree_delete(&hc_list_ptr->iroot, iter.index);
 	}
+	printk("----------- 4 -----------\n");
 
-	kfree(sbi->centers);
-
-    // flush_workqueue(wq);
-    destroy_workqueue(wq);
-    printk("Work queue exit: %s\n", __FUNCTION__);
 }
 
 unsigned int get_type_threshold(struct hotness_entry *he)

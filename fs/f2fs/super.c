@@ -4242,7 +4242,9 @@ static void kill_f2fs_super(struct super_block *sb)
 		f2fs_stop_hc_thread(sbi);
 		save_hotness_entry(sbi);
 		release_hotness_entry(sbi);
+		printk("After release_hotness_entry\n");
 		f2fs_stop_discard_thread(sbi);
+		printk("==================== %s: 1 ===================\n", __func__);
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION
 		/*
