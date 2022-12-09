@@ -2,6 +2,7 @@
 #include <linux/module.h>
 #include <linux/f2fs_fs.h>
 #include <linux/random.h>
+#include <linux/radix-tree.h>
 
 #include "f2fs.h"
 #include "node.h"
@@ -23,6 +24,8 @@ static void bubble_sort(unsigned int *x, int num);
 int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
 {
     struct hotness_entry *he;
+    struct radix_tree_iter iter;
+	void __rcu **slot;
     
 	#ifdef F2FS_PTIME_HC
 	struct timespec64 ts_start, ts_end;
@@ -42,14 +45,16 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
     
     printk("Doing f2fs_hc...\n");
 
-    rcu_read_lock();
-    list_for_each_entry_rcu(he, &hc_list_ptr->ilist, list)
+    radix_tree_for_each_slot(slot, &hc_list_ptr->iroot, &iter, 0)
     {
-        if (he->IRR != UINT_MAX)
+        he = radix_tree_lookup(&hc_list_ptr->iroot, iter.index);
+        if(he && he->IRR && (he->IRR != DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD))
+        {
             data[data_num++] = he->IRR;
-        // printk("IRR = %u", he->IRR);
+            // printk("index: %lx he->IRR: %u\n", iter.index, he->IRR);
+        }
     }
-    rcu_read_unlock();
+
     if (data_num == 0) {
         printk("Function %s return invalid.\n", __func__);
         return -1;

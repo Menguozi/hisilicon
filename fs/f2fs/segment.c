@@ -3469,12 +3469,14 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 {
 	// printk("In do_write_page\n");
 	int type;
-	struct timespec64 ts_start_total, ts_end_total;
-	struct timespec64 ts_start, ts_end;
-	struct timespec64 ts_delta;
+	// struct timespec64 ts_start_total, ts_end_total;
+	// struct timespec64 ts_start, ts_end;
+	// struct timespec64 ts_delta;
 	unsigned int segno;
 	struct hotness_entry *he = NULL;
 	struct hotness_manage *hm;
+	enum temp_type temp;
+	bool keep_order;
 
 	// ktime_get_boottime_ts64(&ts_start_total);
 	/* 温度类型判断 */
@@ -3485,20 +3487,16 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 		he->IRR = fio->sbi->total_writed_block_count - he->LWS;
 		he->LWS = fio->sbi->total_writed_block_count;
 	}
-	// #if TYPE_STRATEGY == TYPE_STRATEGY_THRESHOLD
-	// if (he) {
-	// 	type = get_type_threshold(he);
-	// #elif TYPE_STRATEGY == TYPE_STRATEGY_KMEANS
+	
 	if (he && fio->sbi->centers_valid) {
 		type = kmeans_get_type(fio, he);
-	// #endif
 		if (IS_HOT(type))
 			fio->temp = HOT;
 		else if (IS_WARM(type))
 			fio->temp = WARM;
 		else
 			fio->temp = COLD;
-		enum temp_type temp = fio->temp;
+		temp = fio->temp;
 		hc_list_ptr->counts[temp]++;
 		hc_list_ptr->IRR_min[temp] = MIN(hc_list_ptr->IRR_min[temp], he->IRR);
 		hc_list_ptr->IRR_max[temp] = MAX(hc_list_ptr->IRR_max[temp], he->IRR);
@@ -3506,7 +3504,7 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 		type = __get_segment_type(fio);
 	}
 
-	bool keep_order = (f2fs_lfs_mode(fio->sbi) && type == CURSEG_COLD_DATA);
+	keep_order = (f2fs_lfs_mode(fio->sbi) && type == CURSEG_COLD_DATA);
 
 	if (keep_order)
 		down_read(&fio->sbi->io_order_lock);
@@ -3586,14 +3584,14 @@ reallocate:
 			#endif
 			INIT_WORK(&hm->work, insert_hotness_entry_work);
 			queue_work(wq, &hm->work);
-			if (hc_list_ptr->count >= DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD) {
-				// spin_lock(&shrink_lock);
-				// shrink_hotness_entry();
-				// spin_unlock(&shrink_lock);	
-				hm = f2fs_kmem_cache_alloc(hotness_manage_slab, GFP_KERNEL);
-				INIT_WORK(&hm->work, shrink_hotness_entry_work);
-				queue_work(wq, &hm->work);
-			}
+			// if (hc_list_ptr->count >= DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD) {
+			// 	// spin_lock(&shrink_lock);
+			// 	// shrink_hotness_entry();
+			// 	// spin_unlock(&shrink_lock);	
+			// 	hm = f2fs_kmem_cache_alloc(hotness_manage_slab, GFP_KERNEL);
+			// 	INIT_WORK(&hm->work, shrink_hotness_entry_work);
+			// 	queue_work(wq, &hm->work);
+			// }
 			#ifdef F2FS_PTIME
 			ktime_get_boottime_ts64(&ts_end);
 			ts_delta = timespec64_sub(ts_end, ts_start);

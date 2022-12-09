@@ -4,11 +4,12 @@
 #include <linux/timex.h>
 #include <linux/workqueue.h>    /* for work queue */
 #include <linux/slab.h>         /* for kmalloc() */
+#include <linux/list_lru.h>
 
 // #define F2FS_DEBUG
 // #define F2FS_CONCURRENT
 // #define F2FS_PTIME
-#define F2FS_PTIME_HC
+// #define F2FS_PTIME_HC
 
 #define DEF_HC_THREAD_MIN_SLEEP_TIME	30000	/* milliseconds */
 #define DEF_HC_THREAD_MAX_SLEEP_TIME	60000
@@ -70,7 +71,8 @@ struct hotness_entry_info
 
 /* 热度元数据组织 */
 struct hc_list {
-	struct list_head ilist; // 16 bytes
+	// struct list_head ilist; // 16 bytes
+	struct list_lru lru;
 	struct radix_tree_root iroot; // 16 bytes
 	unsigned  count; // number of hotness entry
 	unsigned int new_blk_cnt;
@@ -79,15 +81,6 @@ struct hc_list {
 	unsigned int rmv_blk_cnt;
 
 	// 记录3种温度类别的一些信息
-	// unsigned int hot_count;
-	// unsigned int hot_IRR_min;
-	// unsigned int hot_IRR_max;
-	// unsigned int warm_count;
-	// unsigned int warm_IRR_min;
-	// unsigned int warm_IRR_max;
-	// unsigned int cold_count;
-	// unsigned int cold_IRR_min;
-	// unsigned int cold_IRR_max;
 	unsigned int counts[TEMP_TYPE_NUM];
 	unsigned int IRR_min[TEMP_TYPE_NUM];
 	unsigned int IRR_max[TEMP_TYPE_NUM];

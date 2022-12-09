@@ -9,19 +9,14 @@
 #include <linux/freezer.h>
 #include <linux/sched/signal.h>
 #include <linux/slab_def.h>
-// #include <include/linux/xarray.h>
 
 #include "f2fs.h"
 #include "node.h"
 #include "segment.h"
 #include "hc.h"
 #include "kmeans.h"
-// #include <trace/events/f2fs.h>
 
-static DEFINE_SPINLOCK(list_lock);
-static DEFINE_MUTEX(list_mutex);
 DEFINE_SPINLOCK(count_lock);
-static DEFINE_SPINLOCK(shrink_lock);
 static struct kmem_cache *hotness_entry_slab;
 struct kmem_cache *hotness_manage_slab;
 struct kmem_cache *hotness_entry_info_slab;
@@ -30,9 +25,6 @@ struct workqueue_struct *wq;
 nid_t last_ino;
 char segment_valid[MAX_SEGNO];
 
-/* 热度元数据操作 */
-/* 1、添加 */
-// create
 int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he, block_t write_count)
 {
 	#ifdef F2FS_PTIME
@@ -46,20 +38,15 @@ int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotne
 	he->IRR = __UINT32_MAX__;
 	he->LWS = write_count;
 	hc_list_ptr->count++;
-	f2fs_radix_tree_insert(&hc_list_ptr->iroot, blkaddr, he);
-	// spin_lock(&list_lock);
-	// mutex_lock(&list_mutex);
-	list_add_tail_rcu(&he->list, &hc_list_ptr->ilist);
-	// spin_unlock(&list_lock);
-	// mutex_unlock(&list_mutex);
+	radix_tree_insert(&hc_list_ptr->iroot, blkaddr, he);
+	INIT_LIST_HEAD(&he->list);
+	list_lru_add(&hc_list_ptr->lru, &he->list);
 
 	#ifdef F2FS_PTIME
 	ktime_get_boottime_ts64(&ts_end);
 	ts_delta = timespec64_sub(ts_end, ts_start);
 	printk("%s: time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
 	#endif
-
-	// printk("%s, slab object_size is %u, slab size is %u, kmem_cache_size(hotness_entry_slab) = %u\n", __func__, hotness_entry_slab->object_size, hotness_entry_slab->size, kmem_cache_size(hotness_entry_slab));
 
 	return 0;
 }
@@ -81,14 +68,10 @@ int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t 
 	ktime_get_boottime_ts64(&ts_start);
 	#endif
 
-	f2fs_radix_tree_insert(&hc_list_ptr->iroot, new_blkaddr, he);
+	radix_tree_insert(&hc_list_ptr->iroot, new_blkaddr, he);
 	radix_tree_delete(&hc_list_ptr->iroot, old_blkaddr);
-	// spin_lock(&list_lock);
-	// mutex_lock(&list_mutex);
-	list_del_rcu(&he->list);
-	list_add_tail_rcu(&he->list, &hc_list_ptr->ilist);
-	// spin_unlock(&list_lock);
-	// mutex_unlock(&list_mutex);
+	list_lru_del(&hc_list_ptr->lru, &he->list);
+	list_lru_add(&hc_list_ptr->lru, &he->list);
 
 	#ifdef F2FS_PTIME
 	ktime_get_boottime_ts64(&ts_end);
@@ -99,7 +82,6 @@ int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t 
 	return 0;
 }
 
-/* 2、查询 */
 struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr)
 {
 	#ifdef F2FS_PTIME
@@ -121,57 +103,39 @@ struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blk
 	return he;
 }
 
-/* 3、移除 */
 int delete_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr)
 {
 	struct hotness_entry *he;
+	#ifdef F2FS_PTIME
+	struct timespec64 ts_start, ts_end;
+	struct timespec64 ts_delta;
+	ktime_get_boottime_ts64(&ts_start);
+	#endif
+
 	he = radix_tree_lookup(&hc_list_ptr->iroot, blkaddr);
 	if (he) {
 		hc_list_ptr->count--;
 		radix_tree_delete(&hc_list_ptr->iroot, he->blk_addr);
-		// spin_lock(&list_lock);
-		// mutex_lock(&list_mutex);
-		list_del_rcu(&he->list);
-		// spin_unlock(&list_lock);
-		// mutex_unlock(&list_mutex);
+		list_lru_del(&hc_list_ptr->lru, &he->list);
 		kmem_cache_free(hotness_entry_slab, he);
+
+		#ifdef F2FS_PTIME
+		ktime_get_boottime_ts64(&ts_end);
+		ts_delta = timespec64_sub(ts_end, ts_start);
+		printk("%s: time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
+		#endif
+
 		return 0;
 	}
 	return -1;
 }
 
 void shrink_hotness_entry(void) {
-	struct hotness_entry *he, *he_next;
-	unsigned int num;
-	block_t blkaddr;
-	printk("Calling function %s\n", __func__);
-	// spin_lock(&list_lock);
-	mutex_lock(&list_mutex);
-	if (hc_list_ptr->count < DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD) {
-		// spin_unlock(&list_lock);
-		mutex_unlock(&list_mutex);
-		return;
-	}
-	he_next = list_first_entry(&hc_list_ptr->ilist, struct hotness_entry, list);
-	for (num = 0; num < DEF_HC_HOTNESS_ENTRY_SHRINK_NUM && !list_entry_is_head(he_next, &hc_list_ptr->ilist, list); num++) {
-		he = he_next;
-		blkaddr = he->blk_addr;
-		he_next = list_next_entry(he, list);
-		// printk("In function %s, remove hotness entry whose blkaddr = %u\n", __func__, blkaddr);
-		radix_tree_delete(&hc_list_ptr->iroot, blkaddr);
-		list_del_rcu(&he->list);
-		// synchronize_rcu();
-		kmem_cache_free(hotness_entry_slab, he);
-		hc_list_ptr->count--;
-	}
-	hc_list_ptr->rmv_blk_cnt += num;
-	// spin_unlock(&list_lock);
-	mutex_unlock(&list_mutex);
+
 }
 
 void insert_hotness_entry_work(struct work_struct *work)
 {
-	// printk("In function: %s\n", __FUNCTION__);
 	struct hotness_manage *hm = container_of(work, struct hotness_manage, work);
 	insert_hotness_entry(NULL, hm->new_blkaddr, hm->he, hm->write_count);
 	kmem_cache_free(hotness_manage_slab, hm);
@@ -179,7 +143,6 @@ void insert_hotness_entry_work(struct work_struct *work)
 
 void update_hotness_entry_work(struct work_struct *work)
 {
-	// printk("In function: %s\n", __FUNCTION__);
 	struct hotness_manage *hm = container_of(work, struct hotness_manage, work);
 	update_hotness_entry(NULL, hm->old_blkaddr, hm->new_blkaddr, hm->he);
 	kmem_cache_free(hotness_manage_slab, hm);
@@ -218,12 +181,7 @@ static void init_hc_management(struct f2fs_sb_info *sbi)
 {
 	struct file *fp;
 	loff_t pos = 0;
-	// block_t blk_addr_tmp;
-	// unsigned int IRR_tmp;
-	// unsigned int LWS_tmp;
-	// struct hotness_entry_info *new_hei = NULL;
 	static struct hc_list hc_list_var = {
-		.ilist = LIST_HEAD_INIT(hc_list_var.ilist),
 		.iroot = RADIX_TREE_INIT(hc_list_var.iroot, GFP_NOFS),
 		.IRR_min = {__UINT32_MAX__, __UINT32_MAX__, __UINT32_MAX__},
 	};
@@ -231,10 +189,10 @@ static void init_hc_management(struct f2fs_sb_info *sbi)
 	unsigned int i;
 	unsigned int *centers = kmalloc(sizeof(unsigned int) * sbi->n_clusters, GFP_KERNEL);
 	unsigned int count;
-
-	hc_list_ptr = &hc_list_var;
-
 	const unsigned int onlinecpus = num_possible_cpus();
+
+	list_lru_init(&hc_list_var.lru);
+	hc_list_ptr = &hc_list_var;
 	// wq = alloc_workqueue("f2fs-hc-workqueue", WQ_HIGHPRI | WQ_CPU_INTENSIVE, 512);
 	// wq = alloc_workqueue("f2fs-hc-workqueue", WQ_UNBOUND | WQ_HIGHPRI, onlinecpus + onlinecpus / 4);
 	wq = alloc_workqueue("f2fs-hc-workqueue", WQ_UNBOUND | WQ_HIGHPRI, onlinecpus / 4);
@@ -365,7 +323,7 @@ void save_hotness_entry(struct f2fs_sb_info *sbi)
 {
 	struct file *fp;
 	loff_t pos = 0;
-	struct hotness_entry *he;
+	// struct hotness_entry *he;
 	unsigned int i;
 
 	printk("In save_hotness_entry");
@@ -386,16 +344,6 @@ void save_hotness_entry(struct f2fs_sb_info *sbi)
 	// save total_writed_block_count
 	kernel_write(fp, &sbi->total_writed_block_count, sizeof(sbi->total_writed_block_count), &pos);
 	printk("%u, 0x%x\n", sbi->total_writed_block_count, sbi->total_writed_block_count);
-	// printk("pos = 0x%llx\n", pos);
-	
-	rcu_read_lock();
-	list_for_each_entry_rcu(he, &hc_list_ptr->ilist, list){
-		kernel_write(fp, &he->blk_addr, sizeof(he->blk_addr), &pos);
-		kernel_write(fp, &he->IRR, sizeof(he->IRR), &pos);
-		kernel_write(fp, &he->LWS, sizeof(he->LWS), &pos);
-	}
-	rcu_read_unlock();
-	// printk("pos = 0x%llx\n", pos);
 	
 	filp_close(fp, NULL);
 out:
@@ -407,13 +355,13 @@ out:
  */
 void release_hotness_entry(struct f2fs_sb_info *sbi)
 {
-	struct hotness_entry *he, *tmp;
+	// struct hotness_entry *he, *tmp;
 	struct radix_tree_iter iter;
 	void __rcu **slot;
 
 	printk("In release_hotness_entry\n");
 
-    // flush_workqueue(wq);
+    flush_workqueue(wq);
     destroy_workqueue(wq);
     printk("Work queue exit: %s\n", __FUNCTION__);
 
@@ -426,22 +374,14 @@ void release_hotness_entry(struct f2fs_sb_info *sbi)
 	printk("----------- 2a -----------\n");
 	if (hc_list_ptr->count == 0) return;
 	printk("----------- 2b -----------\n");
-	// spin_lock(&list_lock);
-	// mutex_lock(&list_mutex);
-	list_for_each_entry_safe(he, tmp, &hc_list_ptr->ilist, list) {
-		printk("he in 0x%p\n", he);
-		list_del_rcu(&he->list);
-		// synchronize_rcu();
-		kmem_cache_free(hotness_entry_slab, he);
-		hc_list_ptr->count--;
-	}
-	// spin_unlock(&list_lock);
-	// mutex_unlock(&list_mutex);
+
+	list_lru_destroy(&hc_list_ptr->lru);
 
 	printk("----------- 3 -----------\n");
 	radix_tree_for_each_slot(slot, &hc_list_ptr->iroot, &iter, 0) {
 		radix_tree_delete(&hc_list_ptr->iroot, iter.index);
 	}
+
 	printk("----------- 4 -----------\n");
 
 }
