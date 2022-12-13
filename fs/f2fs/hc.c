@@ -323,8 +323,10 @@ void save_hotness_entry(struct f2fs_sb_info *sbi)
 {
 	struct file *fp;
 	loff_t pos = 0;
-	// struct hotness_entry *he;
+	struct hotness_entry *he;
 	unsigned int i;
+	struct radix_tree_iter iter;
+	void __rcu **slot;
 
 	printk("In save_hotness_entry");
 
@@ -344,6 +346,14 @@ void save_hotness_entry(struct f2fs_sb_info *sbi)
 	// save total_writed_block_count
 	kernel_write(fp, &sbi->total_writed_block_count, sizeof(sbi->total_writed_block_count), &pos);
 	printk("%u, 0x%x\n", sbi->total_writed_block_count, sbi->total_writed_block_count);
+
+	radix_tree_for_each_slot(slot, &hc_list_ptr->iroot, &iter, 0) {
+		he = radix_tree_lookup(&hc_list_ptr->iroot, iter.index);
+
+		kernel_write(fp, &he->blk_addr, sizeof(he->blk_addr), &pos);
+		kernel_write(fp, &he->IRR, sizeof(he->IRR), &pos);
+		kernel_write(fp, &he->LWS, sizeof(he->LWS), &pos);
+	}
 	
 	filp_close(fp, NULL);
 out:
