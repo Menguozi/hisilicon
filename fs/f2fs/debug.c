@@ -574,8 +574,10 @@ static int stat_show(struct seq_file *s, void *v)
 		// }
 		// rcu_read_unlock();	
 		seq_printf(s, "new_blk_cnt = %u\n", hc_list_ptr->new_blk_cnt);
-		seq_printf(s, "new_blk_compress_cnt = %u\n", hc_list_ptr->new_blk_compress_cnt);
+		// seq_printf(s, "new_blk_compress_cnt = %u\n", hc_list_ptr->new_blk_compress_cnt);
 		seq_printf(s, "upd_blk_cnt = %u\n", hc_list_ptr->upd_blk_cnt);
+		seq_printf(s, "opu_blk_cnt = %u\n", hc_list_ptr->opu_blk_cnt);
+		seq_printf(s, "ipu_blk_cnt = %u\n", hc_list_ptr->ipu_blk_cnt);
 		upd_seg_cnt = 0;
 		for (i = 0; i < MAX_SEGNO; i++) {
 			upd_seg_cnt += segment_valid[i];

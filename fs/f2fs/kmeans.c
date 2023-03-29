@@ -38,25 +38,30 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
     long long *mass_center = kmalloc(sizeof(long long) * center_num * 3, GFP_KERNEL); //存放质心，平均值，集合元素数
     int data_num = 0;
     int i, flag, loop_count, j;
-    if (hc_list_ptr->count > 1000000) {
+    if (hc_list_ptr->count > 100000000) {
         printk("In function %s, hc_list_ptr->count is too large.\n", __func__);
         return -1;
     }
-    
     printk("Doing f2fs_hc...\n");
 
+    // return -1;
+    // if (hc_list_ptr->iroot.xa_head == NULL) {
+    //     printk("In %s: hc_list_ptr->iroot.xa_head == NULL.\n", __func__);
+    //     return -1;
+    // }
     radix_tree_for_each_slot(slot, &hc_list_ptr->iroot, &iter, 0)
     {
         he = radix_tree_lookup(&hc_list_ptr->iroot, iter.index);
-        if(he && he->IRR && (he->IRR != DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD))
+        if(he && he->IRR && (he->IRR != __UINT32_MAX__))
         {
             data[data_num++] = he->IRR;
             // printk("index: %lx he->IRR: %u\n", iter.index, he->IRR);
         }
     }
 
+    printk("In function %s, data_num = %d.\n", __func__, data_num);
     if (data_num == 0) {
-        printk("Function %s return invalid.\n", __func__);
+        printk("In %s: data_num == 0.\n", __func__);
         return -1;
     }
     // if (sbi->centers_valid) {
@@ -149,6 +154,7 @@ static void find_initial_cluster(unsigned int *data, int data_num, long long *ma
     unsigned long long total_distance;
     unsigned long long threshold;
     unsigned long long distance_sum;
+    // printk("In function %s.\n", __func__);
     //随机播种
     if (init_random == 1)
     {
@@ -200,6 +206,7 @@ static void add_to_nearest_set(unsigned int data, long long *mass_center, int ce
      */
     unsigned int min = diff(mass_center[0], data);
     int position = 0, i;
+    // printk("In function %s.\n", __func__);
     for (i = 1; i < center_num; i++)
     {
         unsigned int temp = diff(mass_center[i * 3], data);
@@ -217,6 +224,7 @@ static void add_to_nearest_set(unsigned int data, long long *mass_center, int ce
 static void bubble_sort(unsigned int *x, int num)
 {
     int temp, i, j;
+    // printk("In function %s.\n", __func__);
     for (i = 0; i < num - 1; ++i)
         for (j = 0; j < num - 1 - i; ++j)
             if (x[j] > x[j + 1])

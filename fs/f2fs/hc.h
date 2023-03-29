@@ -11,7 +11,7 @@
 // #define F2FS_PTIME
 // #define F2FS_PTIME_HC
 
-#define DEF_HC_THREAD_MIN_SLEEP_TIME	30000	/* milliseconds */
+#define DEF_HC_THREAD_MIN_SLEEP_TIME	3000	/* milliseconds */
 #define DEF_HC_THREAD_MAX_SLEEP_TIME	60000
 #define DEF_HC_THREAD_NOHC_SLEEP_TIME	300000	/* wait 5 min */
 
@@ -79,6 +79,8 @@ struct hc_list {
 	unsigned int new_blk_compress_cnt;
 	unsigned int upd_blk_cnt;
 	unsigned int rmv_blk_cnt;
+	unsigned int ipu_blk_cnt;
+	unsigned int opu_blk_cnt;
 
 	// 记录3种温度类别的一些信息
 	unsigned int counts[TEMP_TYPE_NUM];
@@ -110,7 +112,6 @@ struct hotness_manage {
 int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he, block_t write_count);
 int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t new_blkaddr,  struct hotness_entry *he);
 struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);
-int delete_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);
 void shrink_hotness_entry(void);
 void insert_hotness_entry_work(struct work_struct *work);
 void update_hotness_entry_work(struct work_struct *work);
@@ -118,6 +119,8 @@ void shrink_hotness_entry_work(struct work_struct *work);
 void save_hotness_entry(struct f2fs_sb_info *sbi);
 void load_hotness_entry(struct f2fs_sb_info *sbi);
 void release_hotness_entry(struct f2fs_sb_info *sbi);
+int hotness_decide(struct f2fs_io_info *fio, struct hotness_entry **he_pp);
+void hotness_maintain(struct f2fs_io_info *fio, struct hotness_entry *he);
 unsigned int get_type_threshold(struct hotness_entry *he);
 
 #endif

@@ -38,6 +38,7 @@ int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotne
 	he->IRR = __UINT32_MAX__;
 	he->LWS = write_count;
 	hc_list_ptr->count++;
+	// printk("%s: blkaddr = %u, he = %p\n", __func__, blkaddr, he);
 	radix_tree_insert(&hc_list_ptr->iroot, blkaddr, he);
 	INIT_LIST_HEAD(&he->list);
 	list_lru_add(&hc_list_ptr->lru, &he->list);
@@ -68,10 +69,16 @@ int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t 
 	ktime_get_boottime_ts64(&ts_start);
 	#endif
 
-	radix_tree_insert(&hc_list_ptr->iroot, new_blkaddr, he);
-	radix_tree_delete(&hc_list_ptr->iroot, old_blkaddr);
-	list_lru_del(&hc_list_ptr->lru, &he->list);
-	list_lru_add(&hc_list_ptr->lru, &he->list);
+	// printk("In %s, old_blkaddr = %u, new_blkaddr = %u, IRR = %u\n", __func__, old_blkaddr, new_blkaddr, he->IRR);
+	if (old_blkaddr != new_blkaddr) {
+		radix_tree_delete(&hc_list_ptr->iroot, old_blkaddr);
+		radix_tree_insert(&hc_list_ptr->iroot, new_blkaddr, he);
+		// list_lru_del(&hc_list_ptr->lru, &he->list);
+		// list_lru_add(&hc_list_ptr->lru, &he->list);
+		hc_list_ptr->opu_blk_cnt++;
+	} else {
+		hc_list_ptr->ipu_blk_cnt++;
+	}
 
 	#ifdef F2FS_PTIME
 	ktime_get_boottime_ts64(&ts_end);
@@ -103,33 +110,6 @@ struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blk
 	return he;
 }
 
-int delete_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr)
-{
-	struct hotness_entry *he;
-	#ifdef F2FS_PTIME
-	struct timespec64 ts_start, ts_end;
-	struct timespec64 ts_delta;
-	ktime_get_boottime_ts64(&ts_start);
-	#endif
-
-	he = radix_tree_lookup(&hc_list_ptr->iroot, blkaddr);
-	if (he) {
-		hc_list_ptr->count--;
-		radix_tree_delete(&hc_list_ptr->iroot, he->blk_addr);
-		list_lru_del(&hc_list_ptr->lru, &he->list);
-		kmem_cache_free(hotness_entry_slab, he);
-
-		#ifdef F2FS_PTIME
-		ktime_get_boottime_ts64(&ts_end);
-		ts_delta = timespec64_sub(ts_end, ts_start);
-		printk("%s: time cost: %lld\n", __func__, timespec64_to_ns(&ts_delta));
-		#endif
-
-		return 0;
-	}
-	return -1;
-}
-
 void shrink_hotness_entry(void) {
 
 }
@@ -153,6 +133,76 @@ void shrink_hotness_entry_work(struct work_struct *work)
 	struct hotness_manage *hm = container_of(work, struct hotness_manage, work);
 	shrink_hotness_entry();
 	kmem_cache_free(hotness_manage_slab, hm);
+}
+
+int hotness_decide(struct f2fs_io_info *fio, struct hotness_entry **he_pp)
+{
+	int type;
+	enum temp_type temp;
+	struct hotness_entry *he = NULL;
+	if (fio->old_blkaddr != __UINT32_MAX__) {
+			he = lookup_hotness_entry(fio->sbi, fio->old_blkaddr);
+		}
+	if (he) { // 存在，还要加锁的
+		he->IRR = fio->sbi->total_writed_block_count - he->LWS;
+		he->LWS = fio->sbi->total_writed_block_count;
+	}
+	if (he && fio->sbi->centers_valid) {
+		type = kmeans_get_type(fio, he);
+		if (IS_HOT(type))
+			fio->temp = HOT;
+		else if (IS_WARM(type))
+			fio->temp = WARM;
+		else
+			fio->temp = COLD;
+		temp = fio->temp;
+		hc_list_ptr->counts[temp]++;
+		hc_list_ptr->IRR_min[temp] = MIN(hc_list_ptr->IRR_min[temp], he->IRR);
+		hc_list_ptr->IRR_max[temp] = MAX(hc_list_ptr->IRR_max[temp], he->IRR);
+	} else {
+		type = CURSEG_WARM_DATA;
+		fio->temp = WARM;
+		temp = fio->temp;
+		hc_list_ptr->counts[temp]++;
+	}
+	*he_pp = he;
+	return type;
+}
+
+void hotness_maintain(struct f2fs_io_info *fio, struct hotness_entry *he)
+{
+	unsigned int segno;
+	struct hotness_manage *hm;
+	// printk("%s: he = %p, temp = %d\n", __func__, he, fio->temp);
+	fio->sbi->total_writed_block_count++;
+	segno = GET_SEGNO(fio->sbi, fio->new_blkaddr);
+	hm = f2fs_kmem_cache_alloc(hotness_manage_slab, GFP_KERNEL);
+	hm->he = he;
+	hm->new_blkaddr = fio->new_blkaddr;
+	if (he) { // 存在
+		// printk("%s: he existed: %p\n", __func__, he);
+		he->blk_addr = fio->new_blkaddr;
+		hm->old_blkaddr = fio->old_blkaddr;
+		INIT_WORK(&hm->work, update_hotness_entry_work);
+		queue_work(wq, &hm->work);
+		hc_list_ptr->upd_blk_cnt++;
+		segment_valid[segno] = 1;
+	}
+	else {/* 不存在 */
+		// printk("%s: he is not existed\n", __func__);
+		hm->write_count = fio->sbi->total_writed_block_count;
+		INIT_WORK(&hm->work, insert_hotness_entry_work);
+		queue_work(wq, &hm->work);
+
+		/* 记录 连续写入块 */
+		hc_list_ptr->new_blk_cnt++;
+		// if (last_ino != __UINT32_MAX__) {
+		// 	if (fio->ino == last_ino) {
+		// 		hc_list_ptr->new_blk_compress_cnt++;
+		// 	}
+		// }
+		// last_ino = fio->ino;
+	}
 }
 
 int f2fs_create_hotness_clustering_cache(void)
@@ -401,3 +451,15 @@ unsigned int get_type_threshold(struct hotness_entry *he)
 	unsigned int IRR = he->IRR;
 	return (IRR < THRESHOLD_HOT_WARM) ? CURSEG_HOT_DATA : ((IRR < THRESHOLD_WARM_COLD) ? CURSEG_WARM_DATA : CURSEG_COLD_DATA);
 }
+
+// inline bool hc_can_inplace_update(struct f2fs_io_info *fio)
+// {
+// 	struct hotness_entry *he = NULL;
+// 	int type;
+// 	if (fio->type == DATA) {
+// 		type = hotness_decide(fio, &he);
+		
+// 	} else {
+// 		return true;
+// 	}
+// }
