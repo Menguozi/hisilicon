@@ -3668,6 +3668,8 @@ void f2fs_stop_hc_thread(struct f2fs_sb_info *sbi);
 void f2fs_build_hc_manager(struct f2fs_sb_info *sbi);
 int f2fs_create_hotness_clustering_cache(void);
 void f2fs_destroy_hotness_clustering_cache(void);
+unsigned int get_segment_hotness_avg(struct f2fs_sb_info *sbi, unsigned int segno);
+bool hc_can_inplace_update(struct f2fs_io_info *fio);
 
 /*
  * recovery.c

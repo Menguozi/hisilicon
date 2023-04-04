@@ -15,9 +15,9 @@
 #define DEF_HC_THREAD_MAX_SLEEP_TIME	60000
 #define DEF_HC_THREAD_NOHC_SLEEP_TIME	300000	/* wait 5 min */
 
-#define DEF_HC_HOTNESS_ENTRY_MAX_NUM 16000
-// #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 15000
-#define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD __UINT32_MAX__
+// #define DEF_HC_HOTNESS_ENTRY_MAX_NUM 16000
+#define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 200000
+// #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD __UINT32_MAX__
 #define DEF_HC_HOTNESS_ENTRY_SHRINK_NUM 10000
 
 #define THRESHOLD_HOT_WARM 29500
@@ -51,7 +51,10 @@ struct hotness_entry
 	unsigned int IRR;/* 最近两次更新间隔时间 */
 	unsigned int LWS;/* 最后一次更新时间 */
 	struct list_head list;
+
+	/* for debug */
 	// struct hotness_entry_info *hei;
+	// unsigned char type; /* CURSEG_HOT_DATA | CURSEG_WARM_DATA | CURSEG_COLD_DATA */
 };
 
 struct hotness_entry_info
@@ -112,15 +115,16 @@ struct hotness_manage {
 int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he, block_t write_count);
 int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t new_blkaddr,  struct hotness_entry *he);
 struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);
-void shrink_hotness_entry(void);
+void reduce_hotness_entry(struct f2fs_sb_info *sbi);
 void insert_hotness_entry_work(struct work_struct *work);
 void update_hotness_entry_work(struct work_struct *work);
-void shrink_hotness_entry_work(struct work_struct *work);
+void reduce_hotness_entry_work(struct work_struct *work);
 void save_hotness_entry(struct f2fs_sb_info *sbi);
 void load_hotness_entry(struct f2fs_sb_info *sbi);
 void release_hotness_entry(struct f2fs_sb_info *sbi);
 int hotness_decide(struct f2fs_io_info *fio, struct hotness_entry **he_pp);
 void hotness_maintain(struct f2fs_io_info *fio, struct hotness_entry *he);
 unsigned int get_type_threshold(struct hotness_entry *he);
+bool hc_can_inplace_update(struct f2fs_io_info *fio);
 
 #endif
