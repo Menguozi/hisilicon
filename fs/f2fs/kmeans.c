@@ -26,12 +26,13 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
     struct hotness_entry *he;
     struct radix_tree_iter iter;
 	void __rcu **slot;
-    
-	#ifdef F2FS_PTIME_HC
-	struct timespec64 ts_start, ts_end;
-	struct timespec64 ts_delta;
-	ktime_get_boottime_ts64(&ts_start);
-	#endif
+    printk("Doing f2fs_hc...\n");
+
+    sbi->centers[0] = 4000*3;
+    sbi->centers[1] = 40000*3;
+    sbi->centers[2] = 400000*3;
+    printk("centers: %u, %u, %u\n", sbi->centers[0], sbi->centers[1], sbi->centers[2]);
+    return 0;
 
     int center_num = sbi->n_clusters;
     unsigned int *data = kmalloc(sizeof(unsigned int) * hc_list_ptr->count, GFP_KERNEL);
@@ -42,7 +43,6 @@ int f2fs_hc(struct hc_list *hc_list_ptr, struct f2fs_sb_info *sbi)
         printk("In function %s, hc_list_ptr->count is too large.\n", __func__);
         return -1;
     }
-    printk("Doing f2fs_hc...\n");
 
     // return -1;
     // if (hc_list_ptr->iroot.xa_head == NULL) {

@@ -16,8 +16,8 @@
 #define DEF_HC_THREAD_NOHC_SLEEP_TIME	300000	/* wait 5 min */
 
 // #define DEF_HC_HOTNESS_ENTRY_MAX_NUM 16000
-#define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 200000
-// #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD __UINT32_MAX__
+// #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 2000000
+#define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD __UINT32_MAX__
 #define DEF_HC_HOTNESS_ENTRY_SHRINK_NUM 10000
 
 #define THRESHOLD_HOT_WARM 29500
@@ -45,12 +45,12 @@ extern struct kmem_cache *hotness_entry_info_slab;
 extern spinlock_t count_lock;
 
 /* 热度定义 */
-struct hotness_entry
+struct hotness_entry // 32B
 {
-	block_t blk_addr;/* 块地址 */
-	unsigned int IRR;/* 最近两次更新间隔时间 */
-	unsigned int LWS;/* 最后一次更新时间 */
-	struct list_head list;
+	struct list_head list; // 8B + 8B
+	unsigned int IRR; /* 4B */
+	unsigned int LWS; /* 4B */
+	block_t blk_addr; /* 4B */
 
 	/* for debug */
 	// struct hotness_entry_info *hei;
