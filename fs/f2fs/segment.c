@@ -3469,13 +3469,14 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 {
 	// printk("In do_write_page\n");
 	int type;
-	struct hotness_entry *he = NULL;
 	bool keep_order;
+	int type_old;
+	__u64 value;
 
 	// ktime_get_boottime_ts64(&ts_start_total);
 	/* 温度类型判断 */
 	if (fio->type == DATA) {
-		type = hotness_decide(fio, &he);
+		type = hotness_decide(fio, &type_old, &value);
 	} else {
 		type = __get_segment_type(fio);
 	}
@@ -3502,12 +3503,9 @@ reallocate:
 
 	// printk("fio->old_blkaddr = %u, fio->new_blkaddr = %u\n", fio->old_blkaddr, fio->new_blkaddr);
 	/* 热度更新维护 */
-	#if 1
-	// if ((fio->type == DATA) && (fio->temp == WARM)) {
 	if (fio->type == DATA) {
-		hotness_maintain(fio, he);
+		hotness_maintain(fio, type_old, type, value);
     }
-	#endif
 
 	update_device_state(fio);
 
@@ -3571,15 +3569,17 @@ int f2fs_inplace_write_data(struct f2fs_io_info *fio)
 	int err;
 	struct f2fs_sb_info *sbi = fio->sbi;
 	unsigned int segno;
+	int type;
+	int type_old;
+	__u64 value;
 
 	fio->new_blkaddr = fio->old_blkaddr;
 	/* i/o temperature is needed for passing down write hints */
 	// __get_segment_type(fio);
 
-	struct hotness_entry *he = NULL;
 	if (fio->type == DATA) {
-		hotness_decide(fio, &he);
-		hotness_maintain(fio, he);
+		type = hotness_decide(fio, &type_old, &value);
+		hotness_maintain(fio, type_old, type, value);
 	} else {
 		__get_segment_type(fio);
 	}

@@ -329,8 +329,6 @@ static int stat_show(struct seq_file *s, void *v)
 	struct f2fs_stat_info *si;
 	int i = 0;
 	int j;
-	// struct hotness_entry *he;
-	unsigned int upd_seg_cnt;
 
 	mutex_lock(&f2fs_stat_mutex);
 	list_for_each_entry(si, &f2fs_stat_list, stat_list) {
@@ -554,45 +552,20 @@ static int stat_show(struct seq_file *s, void *v)
 		seq_printf(s, "  - paged : %llu KB\n",
 				si->page_mem >> 10);
 
-		// i = 0;
-		// block_t blk_addr;
-		// for (blk_addr = 0; blk_addr < MAIN_SEGS(si->sbi) * si->sbi->blocks_per_seg; blk_addr++) {}
-		// struct list_head *p;
-		seq_printf(s, "\n-------------------\n");
-		// list_for_each_entry(he, &hc_list_ptr->ilist, list) {
-		// 	seq_printf(s, "blk_addr = %u, IRR = %u, LWS = %u, ", he->blk_addr, he->IRR, he->LWS);
-		// 	// if (he->hei) 
-		// 		// seq_printf(s, "ino = %u, segno = %u, type = %u, temp = %u, io_type = %u, nid = %u, ofs_in_node = %u", he->hei->ino, he->hei->segno, he->hei->type, he->hei->temp, he->hei->io_type, he->hei->nid, he->hei->ofs_in_node);
-		// 	seq_printf(s, "\n");
-		// }
-		// rcu_read_lock();
-		// list_for_each_entry_rcu(he, &hc_list_ptr->ilist, list) {
-		// 	seq_printf(s, "blk_addr = %u, IRR = %u, LWS = %u, ", he->blk_addr, he->IRR, he->LWS);
-		// 	if (he->hei) 
-		// 		seq_printf(s, "ino = %u, segno = %u, type = %u, temp = %u, io_type = %u, nid = %u, ofs_in_node = %u", he->hei->ino, he->hei->segno, he->hei->type, he->hei->temp, he->hei->io_type, he->hei->nid, he->hei->ofs_in_node);
-		// 	seq_printf(s, "\n");
-		// }
-		// rcu_read_unlock();	
-		seq_printf(s, "new_blk_cnt = %u\n", hc_list_ptr->new_blk_cnt);
-		// seq_printf(s, "new_blk_compress_cnt = %u\n", hc_list_ptr->new_blk_compress_cnt);
-		seq_printf(s, "upd_blk_cnt = %u\n", hc_list_ptr->upd_blk_cnt);
-		seq_printf(s, "opu_blk_cnt = %u\n", hc_list_ptr->opu_blk_cnt);
-		seq_printf(s, "ipu_blk_cnt = %u\n", hc_list_ptr->ipu_blk_cnt);
-		upd_seg_cnt = 0;
-		for (i = 0; i < MAX_SEGNO; i++) {
-			upd_seg_cnt += segment_valid[i];
-		}
-		seq_printf(s, "upd_seg_cnt = %u\n", upd_seg_cnt);
-		seq_printf(s, "rmv_blk_cnt = %u\n", hc_list_ptr->rmv_blk_cnt);
+		seq_printf(s, "new_blk_cnt = %u\n", hotness_info_ptr->new_blk_cnt);
+		seq_printf(s, "upd_blk_cnt = %u\n", hotness_info_ptr->upd_blk_cnt);
+		seq_printf(s, "opu_blk_cnt = %u\n", hotness_info_ptr->opu_blk_cnt);
+		seq_printf(s, "ipu_blk_cnt = %u\n", hotness_info_ptr->ipu_blk_cnt);
+		seq_printf(s, "rmv_blk_cnt = %u\n", hotness_info_ptr->rmv_blk_cnt);
 		if(si->sbi->centers_valid) {
 			for (j = 0; j < si->sbi->n_clusters; ++j) {
 				seq_printf(s, "centers[%u] = %u, ", j, si->sbi->centers[j]);
 			}
 			seq_printf(s, "\n");
 		}
-		seq_printf(s, "hot : count = %u, IRR_min = %u, IRR_max = %u\n", hc_list_ptr->counts[HOT], hc_list_ptr->IRR_min[HOT], hc_list_ptr->IRR_max[HOT]);
-		seq_printf(s, "warm: count = %u, IRR_min = %u, IRR_max = %u\n", hc_list_ptr->counts[WARM], hc_list_ptr->IRR_min[WARM], hc_list_ptr->IRR_max[WARM]);
-		seq_printf(s, "cold: count = %u, IRR_min = %u, IRR_max = %u\n", hc_list_ptr->counts[COLD], hc_list_ptr->IRR_min[COLD], hc_list_ptr->IRR_max[COLD]);
+		seq_printf(s, "hot : count = %u, IRR_min = %u, IRR_max = %u\n", hotness_info_ptr->counts[HOT], hotness_info_ptr->IRR_min[HOT], hotness_info_ptr->IRR_max[HOT]);
+		seq_printf(s, "warm: count = %u, IRR_min = %u, IRR_max = %u\n", hotness_info_ptr->counts[WARM], hotness_info_ptr->IRR_min[WARM], hotness_info_ptr->IRR_max[WARM]);
+		seq_printf(s, "cold: count = %u, IRR_min = %u, IRR_max = %u\n", hotness_info_ptr->counts[COLD], hotness_info_ptr->IRR_min[COLD], hotness_info_ptr->IRR_max[COLD]);
 	}
 	mutex_unlock(&f2fs_stat_mutex);
 	return 0;

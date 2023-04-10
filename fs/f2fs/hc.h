@@ -11,7 +11,7 @@
 // #define F2FS_PTIME
 // #define F2FS_PTIME_HC
 
-#define DEF_HC_THREAD_MIN_SLEEP_TIME	3000	/* milliseconds */
+#define DEF_HC_THREAD_MIN_SLEEP_TIME	30000	/* milliseconds */
 #define DEF_HC_THREAD_MAX_SLEEP_TIME	60000
 #define DEF_HC_THREAD_NOHC_SLEEP_TIME	300000	/* wait 5 min */
 
@@ -35,62 +35,39 @@ enum {
 #define MIN(a, b) ((a) < (b)) ? a : b
 #define MAX(a, b) ((a) < (b)) ? b : a
 
-extern nid_t last_ino;
-extern nid_t last2_ino;
-#define MAX_SEGNO 4*1048576
-extern char segment_valid[MAX_SEGNO];
 extern struct workqueue_struct *wq;
 extern struct kmem_cache *hotness_manage_slab;
-extern struct kmem_cache *hotness_entry_info_slab;
 extern spinlock_t count_lock;
 
-/* 热度定义 */
-struct hotness_entry // 32B
-{
-	struct list_head list; // 8B + 8B
-	unsigned int IRR; /* 4B */
-	unsigned int LWS; /* 4B */
-	block_t blk_addr; /* 4B */
-
-	/* for debug */
-	// struct hotness_entry_info *hei;
-	// unsigned char type; /* CURSEG_HOT_DATA | CURSEG_WARM_DATA | CURSEG_COLD_DATA */
-};
-
-struct hotness_entry_info
-{
-	/* from struct f2fs_io_info */
-	nid_t ino;		/* inode number */
-	enum page_type type;	/* contains DATA/NODE/META/META_FLUSH */
-	enum temp_type temp;	/* contains HOT/WARM/COLD */
-	enum iostat_type io_type;	/* io type */
-
-	/* from struct f2fs_summary */
-	__le32 nid;		/* parent node id */
-	__le16 ofs_in_node;	/* block index in parent node */
-
-	unsigned int segno;
+struct hotness_manage {
+    struct work_struct work;
+	struct f2fs_sb_info *sbi;
+	block_t blkaddr_new;
+	block_t blkaddr_old;
+	__u64 value;
+	int type_old;
+	int type_new;
 };
 
 /* 热度元数据组织 */
-struct hc_list {
-	// struct list_head ilist; // 16 bytes
-	struct list_lru lru;
-	struct radix_tree_root iroot; // 16 bytes
+struct hotness_info {
+	struct radix_tree_root hotness_rt_array[3]; 
+	// struct radix_tree_root hotness_rt_array_hot;
+	// struct radix_tree_root hotness_rt_array_warm;
+	// struct radix_tree_root hotness_rt_array_cold;
+
 	unsigned  count; // number of hotness entry
 	unsigned int new_blk_cnt;
-	unsigned int new_blk_compress_cnt;
 	unsigned int upd_blk_cnt;
 	unsigned int rmv_blk_cnt;
 	unsigned int ipu_blk_cnt;
 	unsigned int opu_blk_cnt;
-
 	// 记录3种温度类别的一些信息
 	unsigned int counts[TEMP_TYPE_NUM];
 	unsigned int IRR_min[TEMP_TYPE_NUM];
 	unsigned int IRR_max[TEMP_TYPE_NUM];
 };
-extern struct hc_list *hc_list_ptr;
+extern struct hotness_info *hotness_info_ptr;
 
 /* 热度聚类 */
 struct f2fs_hc_kthread {
@@ -103,28 +80,18 @@ struct f2fs_hc_kthread {
 	unsigned int no_hc_sleep_time;
 };
 
-struct hotness_manage {
-    struct work_struct work;
-    struct hotness_entry *he;
-	block_t new_blkaddr;
-	block_t old_blkaddr;
-	struct f2fs_sb_info *sbi;
-	block_t write_count;
-};
-
-int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, struct hotness_entry *he, block_t write_count);
-int update_hotness_entry(struct f2fs_sb_info *sbi, block_t old_blkaddr, block_t new_blkaddr,  struct hotness_entry *he);
-struct hotness_entry *lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr);
+int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, __u64 value, int type);
+int update_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr_old, block_t blkaddr_new, __u64 value, int type_old, int type_new);
+__u64 lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, int* type);
 void reduce_hotness_entry(struct f2fs_sb_info *sbi);
+void save_hotness_entry(struct f2fs_sb_info *sbi);
+void release_hotness_entry(struct f2fs_sb_info *sbi);
+
 void insert_hotness_entry_work(struct work_struct *work);
 void update_hotness_entry_work(struct work_struct *work);
 void reduce_hotness_entry_work(struct work_struct *work);
-void save_hotness_entry(struct f2fs_sb_info *sbi);
-void load_hotness_entry(struct f2fs_sb_info *sbi);
-void release_hotness_entry(struct f2fs_sb_info *sbi);
-int hotness_decide(struct f2fs_io_info *fio, struct hotness_entry **he_pp);
-void hotness_maintain(struct f2fs_io_info *fio, struct hotness_entry *he);
-unsigned int get_type_threshold(struct hotness_entry *he);
-bool hc_can_inplace_update(struct f2fs_io_info *fio);
+
+int hotness_decide(struct f2fs_io_info *fio, int *type_old_ptr, __u64 *value_ptr);
+void hotness_maintain(struct f2fs_io_info *fio, int type_old, int type_new, __u64 value);
 
 #endif

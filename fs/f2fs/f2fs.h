@@ -1758,7 +1758,10 @@ struct f2fs_sb_info {
     unsigned int *centers; // hot, warm, cold in order
 	int centers_valid;
     struct f2fs_hc_kthread *hc_thread;
+
+	struct radix_tree_root hotness_rt_array[3]; 
 };
+// struct f2fs_sb_info end
 
 struct f2fs_private_dio {
 	struct inode *inode;
