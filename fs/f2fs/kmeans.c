@@ -17,7 +17,7 @@
 #define RANDOM_SEED 0  // 0为kmeans++播种，1为随机播种
 
 static void add_to_nearest_set(unsigned int data, long long *mass_center, int center_num);
-static void find_initial_cluster(unsigned int *data, int data_num, long long *mass_center, int center_num, int init_random);
+static int find_initial_cluster(unsigned int *data, int data_num, long long *mass_center, int center_num, int init_random);
 static unsigned long long random(void);
 static void bubble_sort(unsigned int *x, int num);
 
@@ -84,7 +84,10 @@ int f2fs_hc(struct hotness_info *hotness_info_ptr, struct f2fs_sb_info *sbi)
     // } else {
     //     find_initial_cluster(data, data_num, mass_center, center_num, RANDOM_SEED);
     // }
-    find_initial_cluster(data, data_num, mass_center, center_num, RANDOM_SEED);
+    if (find_initial_cluster(data, data_num, mass_center, center_num, RANDOM_SEED)) {
+        printk("In %s: find_initial_cluster error.\n", __func__);
+        return -1;
+    }
     flag = 1;
     loop_count = 0;
     // printk("IRRs: ");
@@ -155,7 +158,7 @@ int kmeans_get_type(struct f2fs_io_info *fio, __u32 IRR)
     return type;
 }
 
-static void find_initial_cluster(unsigned int *data, int data_num, long long *mass_center, int center_num, int init_random)
+static int find_initial_cluster(unsigned int *data, int data_num, long long *mass_center, int center_num, int init_random)
 {
     int i, j, k;
     unsigned int *distance;
@@ -169,7 +172,7 @@ static void find_initial_cluster(unsigned int *data, int data_num, long long *ma
 random_seed:
         for (i = 0; i < center_num; ++i)
             mass_center[i * 3] = data[(int)(random() % data_num)];
-        return;
+        return 0;
     }
     // kmeans++播种
     mass_center[0] = data[(int)(random() % data_num)];
@@ -177,6 +180,7 @@ random_seed:
     distance = vmalloc(sizeof(unsigned int) * data_num);
     if (!distance) {
         printk("In %s: distance == NULL, data_num = %d.\n", __func__, data_num);
+        return -1;
     }
     for (k = 1; k < center_num; ++k)
     {
@@ -203,6 +207,7 @@ random_seed:
         mass_center[k * 3] = data[j];
     }
     vfree(distance);
+    return 0;
 }
 
 static unsigned long long random(void)
