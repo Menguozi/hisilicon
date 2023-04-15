@@ -3474,8 +3474,8 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 	__u64 value;
 
 	/* 温度类型判断 */
-	// if (fio->type == DATA && fio->io_type != FS_GC_DATA_IO) {
-	if (fio->type == DATA) {
+	if (fio->type == DATA && fio->io_type != FS_GC_DATA_IO) {
+	// if (fio->type == DATA) {
 		type = hotness_decide(fio, &type_old, &value);
 	} else {
 		type = __get_segment_type(fio);
@@ -3501,8 +3501,8 @@ reallocate:
 		goto reallocate;
 	}
 
-	// if (fio->type == DATA && fio->io_type != FS_GC_DATA_IO) {
-	if (fio->type == DATA) {
+	if (fio->type == DATA && fio->io_type != FS_GC_DATA_IO) {
+	// if (fio->type == DATA) {
 		hotness_maintain(fio, type_old, type, value);
     }
 
@@ -3576,7 +3576,8 @@ int f2fs_inplace_write_data(struct f2fs_io_info *fio)
 	/* i/o temperature is needed for passing down write hints */
 	// __get_segment_type(fio);
 
-	if (fio->type == DATA) {
+	if (fio->type == DATA && fio->io_type != FS_GC_DATA_IO) {
+	// if (fio->type == DATA) {
 		type = hotness_decide(fio, &type_old, &value);
 		hotness_maintain(fio, type_old, type, value);
 	} else {

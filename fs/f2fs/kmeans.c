@@ -41,7 +41,10 @@ int f2fs_hc(struct hotness_info *hotness_info_ptr, struct f2fs_sb_info *sbi)
     // printk("centers: %u, %u, %u\n", sbi->centers[0], sbi->centers[1], sbi->centers[2]);
     // return 0;
 
-    int center_num = sbi->n_clusters;
+    // int center_num = sbi->n_clusters;
+    int center_num = 2;
+    sbi->centers[2] = __UINT32_MAX__ >> 2;
+
     // unsigned int *data = kmalloc(sizeof(unsigned int) * hotness_info_ptr->count, GFP_KERNEL);
     unsigned int *data = vmalloc(sizeof(unsigned int) * hotness_info_ptr->count);
     if (!data) {
@@ -170,9 +173,10 @@ random_seed:
     }
     // kmeans++播种
     mass_center[0] = data[(int)(random() % data_num)];
-    distance = kmalloc(sizeof(unsigned int) * data_num, GFP_KERNEL);
+    // distance = kmalloc(sizeof(unsigned int) * data_num, GFP_KERNEL);
+    distance = vmalloc(sizeof(unsigned int) * data_num);
     if (!distance) {
-        printk("In %s: distance == NULL.\n", __func__);
+        printk("In %s: distance == NULL, data_num = %d.\n", __func__, data_num);
     }
     for (k = 1; k < center_num; ++k)
     {
@@ -198,6 +202,7 @@ random_seed:
         //产生了新的质心
         mass_center[k * 3] = data[j];
     }
+    vfree(distance);
 }
 
 static unsigned long long random(void)
