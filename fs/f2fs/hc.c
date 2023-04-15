@@ -114,9 +114,10 @@ int hotness_decide(struct f2fs_io_info *fio, int *type_old_ptr, __u64 *value_ptr
 {
 	// printk("%s: old_blkaddr = %u, new_blkaddr = %u\n", __func__, fio->old_blkaddr, fio->new_blkaddr);
 	__u64 value, LWS;
-	__u32 IRR;
+	__u32 IRR, IRR1;
 	int type_new, type_old;
 	enum temp_type temp;
+	__u64 LWS_old = 0;
 	type_old = -1;
 	LWS = fio->sbi->total_writed_block_count;
 	if (fio->old_blkaddr != __UINT32_MAX__) {
@@ -124,15 +125,17 @@ int hotness_decide(struct f2fs_io_info *fio, int *type_old_ptr, __u64 *value_ptr
 	}
 	if (type_old == -1) { // 不存在
 		IRR = __UINT32_MAX__ >> 2;
-		value = (LWS << 32) + (IRR << 2);
+		IRR1 = IRR << 2;
+		value = (LWS << 32) + IRR1;
 		type_new = CURSEG_COLD_DATA;
 		fio->temp = COLD;
 		temp = fio->temp;
 		hotness_info_ptr->counts[temp]++;
 	} else {
-		IRR = fio->sbi->total_writed_block_count - (value >> 32);
-		// IRR = fio->sbi->total_writed_block_count - (value >> 33);
-		value = (LWS << 32) + (IRR << 2);
+		LWS_old = value >> 32;
+		IRR = LWS - LWS_old;
+		IRR1 = IRR << 2;
+		value = (LWS << 32) + IRR1;
 		if (fio->sbi->centers_valid) {
 			type_new = kmeans_get_type(fio, IRR);
 		} else {
@@ -149,6 +152,7 @@ int hotness_decide(struct f2fs_io_info *fio, int *type_old_ptr, __u64 *value_ptr
 		hotness_info_ptr->IRR_min[temp] = MIN(hotness_info_ptr->IRR_min[temp], IRR);
 		hotness_info_ptr->IRR_max[temp] = MAX(hotness_info_ptr->IRR_max[temp], IRR);
 	}
+	// printk("%s: LWS = %llu[0x%llx], IRR = %u[0x%x], value = 0x%llx, LWS_old = %llu\n", __func__, LWS, LWS, IRR, IRR, value, LWS_old);
 	fio->sbi->total_writed_block_count++;
 	*type_old_ptr = type_old;
 	*value_ptr = value;
@@ -220,21 +224,14 @@ static void init_hc_management(struct f2fs_sb_info *sbi)
 		.hotness_rt_array[2] = RADIX_TREE_INIT(hotness_info_var.hotness_rt_array[2], GFP_NOFS),
 		.IRR_min = {__UINT32_MAX__ >> 2, __UINT32_MAX__ >> 2, __UINT32_MAX__ >> 2},
 	};
+	// INIT_RADIX_TREE(&hotness_info_ptr->hotness_rt_array[0], GFP_NOFS);
+	// INIT_RADIX_TREE(&hotness_info_ptr->hotness_rt_array[1], GFP_NOFS);
+	// INIT_RADIX_TREE(&hotness_info_ptr->hotness_rt_array[2], GFP_NOFS);
 	hotness_info_ptr = &hotness_info_var;
 	printk("In %s, hotness_info_ptr->hotness_rt_array[0] in %p\n", __func__, &hotness_info_ptr->hotness_rt_array[0]);
 	printk("In %s, hotness_info_ptr->hotness_rt_array[1] in %p\n", __func__, &hotness_info_ptr->hotness_rt_array[1]);
 	printk("In %s, hotness_info_ptr->hotness_rt_array[2] in %p\n", __func__, &hotness_info_ptr->hotness_rt_array[2]);
 	centers = kmalloc(sizeof(unsigned int) * sbi->n_clusters, GFP_KERNEL);
-
-	// hotness_info_ptr->hotness_rt_array[0] = RADIX_TREE_INIT(hotness_info_ptr->hotness_rt_array[0], GFP_NOFS);
-	// hotness_info_ptr->hotness_rt_array[1] = RADIX_TREE_INIT(hotness_info_ptr->hotness_rt_array[1], GFP_NOFS);
-	// hotness_info_ptr->hotness_rt_array[2] = RADIX_TREE_INIT(hotness_info_ptr->hotness_rt_array[2], GFP_NOFS);
-	// INIT_RADIX_TREE(&hotness_info_ptr->hotness_rt_array[0], GFP_NOFS);
-	// INIT_RADIX_TREE(&hotness_info_ptr->hotness_rt_array[1], GFP_NOFS);
-	// INIT_RADIX_TREE(&hotness_info_ptr->hotness_rt_array[2], GFP_NOFS);
-	// printk("In %s, hotness_info_ptr->hotness_rt_array[0] in %p\n", __func__, &hotness_info_ptr->hotness_rt_array[0]);
-	// printk("In %s, hotness_info_ptr->hotness_rt_array[1] in %p\n", __func__, &hotness_info_ptr->hotness_rt_array[1]);
-	// printk("In %s, hotness_info_ptr->hotness_rt_array[2] in %p\n", __func__, &hotness_info_ptr->hotness_rt_array[2]);
 
 	const unsigned int onlinecpus = num_possible_cpus();
 	// wq = alloc_workqueue("f2fs-hc-workqueue", WQ_HIGHPRI | WQ_CPU_INTENSIVE, 512);

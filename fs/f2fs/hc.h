@@ -11,13 +11,13 @@
 // #define F2FS_PTIME
 // #define F2FS_PTIME_HC
 
-#define DEF_HC_THREAD_MIN_SLEEP_TIME	30000	/* milliseconds */
+#define DEF_HC_THREAD_MIN_SLEEP_TIME	3000	/* milliseconds */
 #define DEF_HC_THREAD_MAX_SLEEP_TIME	60000
 #define DEF_HC_THREAD_NOHC_SLEEP_TIME	300000	/* wait 5 min */
 
 // #define DEF_HC_HOTNESS_ENTRY_MAX_NUM 16000
-// #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 2000000
-#define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD __UINT32_MAX__
+#define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 200000
+// #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD __UINT32_MAX__
 #define DEF_HC_HOTNESS_ENTRY_SHRINK_NUM 10000
 
 #define THRESHOLD_HOT_WARM 29500
@@ -56,7 +56,7 @@ struct hotness_info {
 	// struct radix_tree_root hotness_rt_array_warm;
 	// struct radix_tree_root hotness_rt_array_cold;
 
-	unsigned  count; // number of hotness entry
+	unsigned int count; // number of hotness entry
 	unsigned int new_blk_cnt;
 	unsigned int upd_blk_cnt;
 	unsigned int rmv_blk_cnt;

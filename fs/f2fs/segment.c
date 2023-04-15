@@ -3473,8 +3473,8 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 	int type_old;
 	__u64 value;
 
-	// ktime_get_boottime_ts64(&ts_start_total);
 	/* 温度类型判断 */
+	// if (fio->type == DATA && fio->io_type != FS_GC_DATA_IO) {
 	if (fio->type == DATA) {
 		type = hotness_decide(fio, &type_old, &value);
 	} else {
@@ -3501,8 +3501,7 @@ reallocate:
 		goto reallocate;
 	}
 
-	// printk("fio->old_blkaddr = %u, fio->new_blkaddr = %u\n", fio->old_blkaddr, fio->new_blkaddr);
-	/* 热度更新维护 */
+	// if (fio->type == DATA && fio->io_type != FS_GC_DATA_IO) {
 	if (fio->type == DATA) {
 		hotness_maintain(fio, type_old, type, value);
     }

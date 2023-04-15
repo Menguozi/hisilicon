@@ -552,6 +552,22 @@ static int stat_show(struct seq_file *s, void *v)
 		seq_printf(s, "  - paged : %llu KB\n",
 				si->page_mem >> 10);
 
+		// struct radix_tree_iter iter;
+		// void __rcu **slot;
+		// __u64 value, LWS;
+		// __u32 IRR;
+		// block_t blk_addr;
+		// int type;
+		// for (type = 0; type < 3; type++) {
+		// 	radix_tree_for_each_slot(slot, &hotness_info_ptr->hotness_rt_array[type], &iter, 0) {
+		// 		blk_addr = iter.index;
+		// 		value = (__u64) radix_tree_lookup(&hotness_info_ptr->hotness_rt_array[type], blk_addr);
+		// 		IRR = value & 0xffffffff;
+		// 		LWS = value >> 32;
+		// 		printk("%u: LWS = %llu[0x%llx], IRR = %u[0x%x], value = 0x%llx\n", blk_addr, LWS, LWS, IRR, IRR, value);
+		// 	}
+		// }
+
 		seq_printf(s, "new_blk_cnt = %u\n", hotness_info_ptr->new_blk_cnt);
 		seq_printf(s, "upd_blk_cnt = %u\n", hotness_info_ptr->upd_blk_cnt);
 		seq_printf(s, "opu_blk_cnt = %u\n", hotness_info_ptr->opu_blk_cnt);
@@ -566,6 +582,7 @@ static int stat_show(struct seq_file *s, void *v)
 		seq_printf(s, "hot : count = %u, IRR_min = %u, IRR_max = %u\n", hotness_info_ptr->counts[HOT], hotness_info_ptr->IRR_min[HOT], hotness_info_ptr->IRR_max[HOT]);
 		seq_printf(s, "warm: count = %u, IRR_min = %u, IRR_max = %u\n", hotness_info_ptr->counts[WARM], hotness_info_ptr->IRR_min[WARM], hotness_info_ptr->IRR_max[WARM]);
 		seq_printf(s, "cold: count = %u, IRR_min = %u, IRR_max = %u\n", hotness_info_ptr->counts[COLD], hotness_info_ptr->IRR_min[COLD], hotness_info_ptr->IRR_max[COLD]);
+
 	}
 	mutex_unlock(&f2fs_stat_mutex);
 	return 0;

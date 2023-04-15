@@ -29,38 +29,41 @@ int f2fs_hc(struct hotness_info *hotness_info_ptr, struct f2fs_sb_info *sbi)
 	__u32 IRR;
 	block_t blk_addr;
     int type;
-    printk("Doing f2fs_hc...\n");
-
-    // sbi->centers[0] = 4000*3;
-    // sbi->centers[1] = 40000*3;
-    // sbi->centers[2] = 400000*3;
-    // printk("centers: %u, %u, %u\n", sbi->centers[0], sbi->centers[1], sbi->centers[2]);
-    // return 0;
-
-    int center_num = sbi->n_clusters;
-    unsigned int *data = kmalloc(sizeof(unsigned int) * hotness_info_ptr->count, GFP_KERNEL);
-    long long *mass_center = kmalloc(sizeof(long long) * center_num * 3, GFP_KERNEL); //存放质心，平均值，集合元素数
-    int data_num = 0;
-    int i, flag, loop_count, j;
+    printk("Doing f2fs_hc, count = %u.\n", hotness_info_ptr->count);
     if (hotness_info_ptr->count > 100000000) {
         printk("In function %s, hotness_info_ptr->count is too large.\n", __func__);
         return -1;
     }
 
-    // return -1;
-    // if (hotness_info_ptr->iroot.xa_head == NULL) {
-    //     printk("In %s: hotness_info_ptr->iroot.xa_head == NULL.\n", __func__);
-    //     return -1;
-    // }
+    // sbi->centers[0] = 170*3;
+    // sbi->centers[1] = 17000*3;
+    // sbi->centers[2] = 425000*3;
+    // printk("centers: %u, %u, %u\n", sbi->centers[0], sbi->centers[1], sbi->centers[2]);
+    // return 0;
+
+    int center_num = sbi->n_clusters;
+    unsigned int *data = kmalloc(sizeof(unsigned int) * hotness_info_ptr->count, GFP_KERNEL);
+    if (!data) {
+        printk("In %s: data == NULL, count = %u.\n", __func__, hotness_info_ptr->count);
+        // return -1;
+    }
+    long long *mass_center = kmalloc(sizeof(long long) * center_num * 3, GFP_KERNEL); //存放质心，平均值，集合元素数
+    if (!mass_center) {
+        printk("In %s: mass_center == NULL.\n", __func__);
+        return -1;
+    }
+    int data_num = 0;
+    int i, flag, loop_count, j;
+   
     for (type = 0; type < 3; type++) {
         radix_tree_for_each_slot(slot, &hotness_info_ptr->hotness_rt_array[type], &iter, 0) {
 			blk_addr = iter.index;
 			value = (__u64) radix_tree_lookup(&hotness_info_ptr->hotness_rt_array[type], blk_addr);
     		IRR = (value & 0xffffffff) >> 2;
-            if(IRR && (IRR != __UINT32_MAX__ >> 2))
+            if(IRR && (IRR != (__UINT32_MAX__ >> 2)))
             {
                 data[data_num++] = IRR;
-                // printk("index: %lx he->IRR: %u\n", iter.index, he->IRR);
+                // printk("IRR: %u\n", IRR);
             }
         }
     }
@@ -166,6 +169,9 @@ random_seed:
     // kmeans++播种
     mass_center[0] = data[(int)(random() % data_num)];
     distance = kmalloc(sizeof(unsigned int) * data_num, GFP_KERNEL);
+    if (!distance) {
+        printk("In %s: distance == NULL.\n", __func__);
+    }
     for (k = 1; k < center_num; ++k)
     {
         total_distance = 0;
