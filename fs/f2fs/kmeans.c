@@ -42,10 +42,11 @@ int f2fs_hc(struct hotness_info *hotness_info_ptr, struct f2fs_sb_info *sbi)
     // return 0;
 
     int center_num = sbi->n_clusters;
-    unsigned int *data = kmalloc(sizeof(unsigned int) * hotness_info_ptr->count, GFP_KERNEL);
+    // unsigned int *data = kmalloc(sizeof(unsigned int) * hotness_info_ptr->count, GFP_KERNEL);
+    unsigned int *data = vmalloc(sizeof(unsigned int) * hotness_info_ptr->count);
     if (!data) {
         printk("In %s: data == NULL, count = %u.\n", __func__, hotness_info_ptr->count);
-        // return -1;
+        return -1;
     }
     long long *mass_center = kmalloc(sizeof(long long) * center_num * 3, GFP_KERNEL); //存放质心，平均值，集合元素数
     if (!mass_center) {
@@ -127,7 +128,8 @@ int f2fs_hc(struct hotness_info *hotness_info_ptr, struct f2fs_sb_info *sbi)
     else
         printk("center num is error!\n");
 
-    kfree(data);
+    // kfree(data);
+    vfree(data);
     kfree(mass_center);
 
     return 0;
