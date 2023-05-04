@@ -4242,9 +4242,8 @@ static void kill_f2fs_super(struct super_block *sb)
 		f2fs_stop_hc_thread(sbi);
 		save_hotness_entry(sbi);
 		release_hotness_entry(sbi);
-		printk("After release_hotness_entry\n");
+		kfree(sbi->hi);
 		f2fs_stop_discard_thread(sbi);
-		printk("==================== %s: 1 ===================\n", __func__);
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION
 		/*
@@ -4329,12 +4328,9 @@ static int __init init_f2fs_fs(void)
 	err = f2fs_create_garbage_collection_cache();
 	if (err)
 		goto free_extent_cache;
-	err = f2fs_create_hotness_clustering_cache();
-	if (err)
-		goto free_garbage_collection_cache;
 	err = f2fs_init_sysfs();
 	if (err)
-		goto free_hotness_clustering_cache;
+		goto free_garbage_collection_cache;
 	err = register_shrinker(&f2fs_shrinker_info);
 	if (err)
 		goto free_sysfs;
@@ -4378,8 +4374,6 @@ free_shrinker:
 	unregister_shrinker(&f2fs_shrinker_info);
 free_sysfs:
 	f2fs_exit_sysfs();
-free_hotness_clustering_cache:
-	f2fs_destroy_hotness_clustering_cache();
 free_garbage_collection_cache:
 	f2fs_destroy_garbage_collection_cache();
 free_extent_cache:
@@ -4411,7 +4405,6 @@ static void __exit exit_f2fs_fs(void)
 	unregister_shrinker(&f2fs_shrinker_info);
 	f2fs_exit_sysfs();
 	f2fs_destroy_garbage_collection_cache();
-	f2fs_destroy_hotness_clustering_cache();
 	f2fs_destroy_extent_cache();
 	f2fs_destroy_recovery_cache();
 	f2fs_destroy_checkpoint_caches();

@@ -3275,7 +3275,7 @@ static int __get_segment_type_4(struct f2fs_io_info *fio)
 {
 	if (fio->type == DATA) {
 		struct inode *inode = fio->page->mapping->host;
-		
+
 		if (S_ISDIR(inode->i_mode))
 			return CURSEG_HOT_DATA;
 		else
@@ -3467,15 +3467,12 @@ static void update_device_state(struct f2fs_io_info *fio)
 
 static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 {
-	// printk("In do_write_page\n");
 	int type;
 	bool keep_order;
 	int type_old;
 	__u64 value;
 
-	/* 温度类型判断 */
-	if (fio->type == DATA && fio->io_type != FS_GC_DATA_IO) {
-	// if (fio->type == DATA) {
+	if (fio->type == DATA && (!page_private_gcing(fio->page))) {
 		type = hotness_decide(fio, &type_old, &value);
 	} else {
 		type = __get_segment_type(fio);
@@ -3501,8 +3498,7 @@ reallocate:
 		goto reallocate;
 	}
 
-	if (fio->type == DATA && fio->io_type != FS_GC_DATA_IO) {
-	// if (fio->type == DATA) {
+	if (fio->type == DATA && (!page_private_gcing(fio->page))) {
 		hotness_maintain(fio, type_old, type, value);
     }
 
@@ -3576,8 +3572,7 @@ int f2fs_inplace_write_data(struct f2fs_io_info *fio)
 	/* i/o temperature is needed for passing down write hints */
 	// __get_segment_type(fio);
 
-	if (fio->type == DATA && fio->io_type != FS_GC_DATA_IO) {
-	// if (fio->type == DATA) {
+	if (fio->type == DATA && (!page_private_gcing(fio->page))) {
 		type = hotness_decide(fio, &type_old, &value);
 		hotness_maintain(fio, type_old, type, value);
 	} else {

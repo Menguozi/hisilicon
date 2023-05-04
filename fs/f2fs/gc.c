@@ -333,10 +333,6 @@ static unsigned int get_cb_cost(struct f2fs_sb_info *sbi, unsigned int segno)
 				sit_i->max_mtime - sit_i->min_mtime);
 
 	return UINT_MAX - ((100 * (100 - u) * age) / (100 + u));
-
-	/* hc */
-	// unsigned int IRR_seg = get_segment_hotness_avg(sbi, segno);
-	// return UINT_MAX - (((100 - u) * IRR_seg) / (100 + u));
 }
 
 static inline unsigned int get_gc_cost(struct f2fs_sb_info *sbi,
