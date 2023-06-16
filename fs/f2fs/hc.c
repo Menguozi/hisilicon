@@ -204,14 +204,11 @@ static int kmeans_thread_func(void *data)
 	struct f2fs_sb_info *sbi = data;
 	struct f2fs_hc_kthread *hc_th = sbi->hc_thread;
 	wait_queue_head_t *wq = &sbi->hc_thread->hc_wait_queue_head;
-	unsigned int wait_ms;
 	int err;
-
-	wait_ms = hc_th->min_sleep_time;
 
 	set_freezable();
 	do {
-		wait_event_interruptible_timeout(*wq, kthread_should_stop() || freezing(current), msecs_to_jiffies(wait_ms));
+		wait_event_interruptible_timeout(*wq, kthread_should_stop() || freezing(current), msecs_to_jiffies(hc_th->min_sleep_time));
 		err = f2fs_hc(sbi);
 		if (!err) sbi->centers_valid = 1;
 	} while (!kthread_should_stop());

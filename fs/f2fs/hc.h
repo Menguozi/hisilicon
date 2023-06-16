@@ -5,8 +5,8 @@
 #include <linux/workqueue.h>    /* for work queue */
 #include <linux/slab.h>         /* for kmalloc() */
 
-#define DEF_HC_THREAD_MIN_SLEEP_TIME	10000	/* milliseconds */
-#define DEF_HC_THREAD_MAX_SLEEP_TIME	30000
+#define DEF_HC_THREAD_MIN_SLEEP_TIME	60000	/* milliseconds */
+#define DEF_HC_THREAD_MAX_SLEEP_TIME	120000
 #define DEF_HC_THREAD_NOHC_SLEEP_TIME	300000	/* wait 5 min */
 
 #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 1000000
