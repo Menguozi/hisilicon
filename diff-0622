@@ -1,0 +1,964 @@
+diff --git a/fs/f2fs/Makefile b/fs/f2fs/Makefile
+index e52957462..3bebd9035 100644
+--- a/fs/f2fs/Makefile
++++ b/fs/f2fs/Makefile
+@@ -3,7 +3,7 @@ obj-$(CONFIG_F2FS_FS) += f2fs.o
+ 
+ f2fs-y		:= dir.o file.o inode.o namei.o hash.o super.o inline.o
+ f2fs-y		+= checkpoint.o gc.o data.o node.o segment.o recovery.o
+-f2fs-y		+= shrinker.o extent_cache.o sysfs.o
++f2fs-y		+= shrinker.o extent_cache.o sysfs.o kmeans.o hc.o
+ f2fs-$(CONFIG_F2FS_STAT_FS) += debug.o
+ f2fs-$(CONFIG_F2FS_FS_XATTR) += xattr.o
+ f2fs-$(CONFIG_F2FS_FS_POSIX_ACL) += acl.o
+diff --git a/fs/f2fs/data.c b/fs/f2fs/data.c
+index 821da92fe..8356e6b57 100644
+--- a/fs/f2fs/data.c
++++ b/fs/f2fs/data.c
+@@ -2596,7 +2596,7 @@ int f2fs_do_write_data_page(struct f2fs_io_info *fio)
+ 	 */
+ 	if (ipu_force ||
+ 		(__is_valid_data_blkaddr(fio->old_blkaddr) &&
+-					need_inplace_update(fio))) {
++					need_inplace_update(fio) && hc_can_inplace_update(fio))) {
+ 		err = f2fs_encrypt_one_page(fio);
+ 		if (err)
+ 			goto out_writepage;
+diff --git a/fs/f2fs/debug.c b/fs/f2fs/debug.c
+index 53ed1e919..21a79636a 100644
+--- a/fs/f2fs/debug.c
++++ b/fs/f2fs/debug.c
+@@ -19,6 +19,7 @@
+ #include "node.h"
+ #include "segment.h"
+ #include "gc.h"
++#include "hc.h"
+ 
+ static LIST_HEAD(f2fs_stat_list);
+ static DEFINE_MUTEX(f2fs_stat_mutex);
+@@ -550,6 +551,22 @@ static int stat_show(struct seq_file *s, void *v)
+ 				si->cache_mem >> 10);
+ 		seq_printf(s, "  - paged : %llu KB\n",
+ 				si->page_mem >> 10);
++
++		seq_printf(s, "new_blk_cnt = %u\n", si->sbi->hi->new_blk_cnt);
++		seq_printf(s, "upd_blk_cnt = %u\n", si->sbi->hi->upd_blk_cnt);
++		seq_printf(s, "opu_blk_cnt = %u\n", si->sbi->hi->opu_blk_cnt);
++		seq_printf(s, "ipu_blk_cnt = %u\n", si->sbi->hi->ipu_blk_cnt);
++		seq_printf(s, "rmv_blk_cnt = %u\n", si->sbi->hi->rmv_blk_cnt);
++		if(si->sbi->centers_valid) {
++			for (j = 0; j < si->sbi->n_clusters; ++j) {
++				seq_printf(s, "centers[%u] = %u, ", j, si->sbi->centers[j]);
++			}
++			seq_printf(s, "\n");
++		}
++		seq_printf(s, "hot : count = %u, IRR_min = %u, IRR_max = %u\n", si->sbi->hi->counts[HOT], si->sbi->hi->IRR_min[HOT], si->sbi->hi->IRR_max[HOT]);
++		seq_printf(s, "warm: count = %u, IRR_min = %u, IRR_max = %u\n", si->sbi->hi->counts[WARM], si->sbi->hi->IRR_min[WARM], si->sbi->hi->IRR_max[WARM]);
++		seq_printf(s, "cold: count = %u, IRR_min = %u, IRR_max = %u\n", si->sbi->hi->counts[COLD], si->sbi->hi->IRR_min[COLD], si->sbi->hi->IRR_max[COLD]);
++
+ 	}
+ 	mutex_unlock(&f2fs_stat_mutex);
+ 	return 0;
+diff --git a/fs/f2fs/f2fs.h b/fs/f2fs/f2fs.h
+index c129a91b3..5b78db3c2 100644
+--- a/fs/f2fs/f2fs.h
++++ b/fs/f2fs/f2fs.h
+@@ -1523,6 +1523,26 @@ struct decompress_io_ctx {
+ #define MAX_COMPRESS_LOG_SIZE		8
+ #define MAX_COMPRESS_WINDOW_SIZE(log_size)	((PAGE_SIZE) << (log_size))
+ 
++
++#define N_CLUSTERS 3
++#define TEMP_TYPE_NUM 3
++
++/* 热度元数据组织 */
++struct hotness_info {
++	struct xarray hotness_rt_array[TEMP_TYPE_NUM]; 
++
++	unsigned int count; // number of hotness entry
++	unsigned int new_blk_cnt;
++	unsigned int upd_blk_cnt;
++	unsigned int rmv_blk_cnt;
++	unsigned int ipu_blk_cnt;
++	unsigned int opu_blk_cnt;
++	// 记录3种温度类别的一些信息
++	unsigned int counts[TEMP_TYPE_NUM];
++	unsigned int IRR_min[TEMP_TYPE_NUM];
++	unsigned int IRR_max[TEMP_TYPE_NUM];
++};
++
+ struct f2fs_sb_info {
+ 	struct super_block *sb;			/* pointer to VFS super block */
+ 	struct proc_dir_entry *s_proc;		/* proc entry */
+@@ -1751,6 +1771,15 @@ struct f2fs_sb_info {
+ 	unsigned int compress_watermark;	/* cache page watermark */
+ 	atomic_t compress_page_hit;		/* cache hit count */
+ #endif
++
++	/* hotness clustering */
++	struct hotness_info *hi;
++	block_t total_writed_block_count; // warm data block write count
++    unsigned int n_clusters;
++    unsigned int *centers; // hot, warm, cold in order
++	int centers_valid;
++    struct f2fs_hc_kthread *hc_thread;
++	struct radix_tree_root hotness_rt_array[3]; 
+ };
+ 
+ struct f2fs_private_dio {
+@@ -3653,6 +3682,15 @@ int f2fs_resize_fs(struct f2fs_sb_info *sbi, __u64 block_count);
+ int __init f2fs_create_garbage_collection_cache(void);
+ void f2fs_destroy_garbage_collection_cache(void);
+ 
++/*
++ * hc.c
++ */
++int f2fs_start_hc_thread(struct f2fs_sb_info *sbi);
++void f2fs_stop_hc_thread(struct f2fs_sb_info *sbi);
++void f2fs_build_hc_manager(struct f2fs_sb_info *sbi);
++unsigned int get_segment_hotness_avg(struct f2fs_sb_info *sbi, unsigned int segno);
++bool hc_can_inplace_update(struct f2fs_io_info *fio);
++
+ /*
+  * recovery.c
+  */
+diff --git a/fs/f2fs/hc.c b/fs/f2fs/hc.c
+new file mode 100644
+index 000000000..8888d39de
+--- /dev/null
++++ b/fs/f2fs/hc.c
+@@ -0,0 +1,350 @@
++#include <linux/fs.h>
++#include <linux/module.h>
++#include <linux/backing-dev.h>
++#include <linux/init.h>
++#include <linux/f2fs_fs.h>
++#include <linux/kthread.h>
++#include <linux/delay.h>
++#include <linux/timer.h>
++#include <linux/freezer.h>
++#include <linux/sched/signal.h>
++#include <linux/slab_def.h>
++#include <linux/random.h>
++
++#include "f2fs.h"
++#include "node.h"
++#include "segment.h"
++#include "hc.h"
++#include "kmeans.h"
++
++static DEFINE_MUTEX(mutex_reduce_he);
++
++int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, __u64 value, int type)
++{
++	radix_tree_insert(&sbi->hi->hotness_rt_array[type], blkaddr, (void *) value);
++	sbi->hi->count++;
++	sbi->hi->new_blk_cnt++;
++	return 0;
++}
++
++int update_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr_old, block_t blkaddr_new, __u64 value, int type_old, int type_new)
++{
++	radix_tree_delete(&sbi->hi->hotness_rt_array[type_old], blkaddr_old);
++	radix_tree_insert(&sbi->hi->hotness_rt_array[type_new], blkaddr_new, (void *) value);
++
++	sbi->hi->upd_blk_cnt++;
++	if (blkaddr_old != blkaddr_new) {
++		sbi->hi->opu_blk_cnt++;
++	} else {
++		sbi->hi->ipu_blk_cnt++;
++	}
++	return 0;
++}
++
++__u64 lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, int* type)
++{
++	void *value;
++	value = radix_tree_lookup(&sbi->hi->hotness_rt_array[0], blkaddr);
++	if (value) {
++		*type = CURSEG_HOT_DATA;
++		goto found;
++	}
++	value = radix_tree_lookup(&sbi->hi->hotness_rt_array[1], blkaddr);
++	if (value) {
++		*type = CURSEG_WARM_DATA;
++		goto found;
++	}
++	value = radix_tree_lookup(&sbi->hi->hotness_rt_array[2], blkaddr);
++	if (value) {
++		*type = CURSEG_COLD_DATA;
++		goto found;
++	}
++	// not_found
++	*type = -1;
++	return 0;
++found:
++	return (__u64) value;
++}
++
++void reduce_hotness_entry(struct f2fs_sb_info *sbi) {
++	struct radix_tree_iter iter;
++	void __rcu **slot;
++	int type;
++	unsigned int count = 0;
++	for (type = TEMP_TYPE_NUM - 1; type >= 0; type--) {
++		radix_tree_for_each_slot(slot, &sbi->hi->hotness_rt_array[type], &iter, 0) {
++			if (count >= DEF_HC_HOTNESS_ENTRY_SHRINK_NUM) {
++				goto out;
++			}
++			radix_tree_delete(&sbi->hi->hotness_rt_array[type], iter.index);
++			sbi->hi->count--;
++			count++;
++		}
++	}
++out:
++	sbi->hi->rmv_blk_cnt += count;
++	mutex_unlock(&mutex_reduce_he);
++}
++
++int hotness_decide(struct f2fs_io_info *fio, int *type_old_ptr, __u64 *value_ptr)
++{
++	__u64 value, LWS;
++	__u32 IRR, IRR1;
++	int type_new, type_old;
++	enum temp_type temp;
++	__u64 LWS_old = 0;
++	type_old = -1;
++	LWS = fio->sbi->total_writed_block_count;
++	if (fio->old_blkaddr != __UINT32_MAX__) {
++		value = lookup_hotness_entry(fio->sbi, fio->old_blkaddr, &type_old);
++	}
++	if (type_old == -1) { // 不存在
++		IRR = __UINT32_MAX__ >> 2;
++		IRR1 = IRR << 2;
++		value = (LWS << 32) + IRR1;
++		type_new = CURSEG_COLD_DATA;
++		fio->temp = COLD;
++		temp = fio->temp;
++		fio->sbi->hi->counts[temp]++;
++	} else {
++		LWS_old = value >> 32;
++		IRR = LWS - LWS_old;
++		IRR1 = IRR << 2;
++		value = (LWS << 32) + IRR1;
++		if (fio->sbi->centers_valid) {
++			type_new = kmeans_get_type(fio, IRR);
++		} else {
++			type_new = type_old;
++		}
++		if (IS_HOT(type_new))
++			fio->temp = HOT;
++		else if (IS_WARM(type_new))
++			fio->temp = WARM;
++		else
++			fio->temp = COLD;
++		temp = fio->temp;
++		fio->sbi->hi->counts[temp]++;
++		fio->sbi->hi->IRR_min[temp] = MIN(fio->sbi->hi->IRR_min[temp], IRR);
++		fio->sbi->hi->IRR_max[temp] = MAX(fio->sbi->hi->IRR_max[temp], IRR);
++	}
++	fio->sbi->total_writed_block_count++;
++	*type_old_ptr = type_old;
++	*value_ptr = value;
++	return type_new;
++}
++
++void hotness_maintain(struct f2fs_io_info *fio, int type_old, int type_new, __u64 value)
++{
++	if (type_old == -1) { /* 不存在 */
++		insert_hotness_entry(fio->sbi, fio->new_blkaddr, value, type_new);
++	} else { // 存在
++		update_hotness_entry(fio->sbi, fio->old_blkaddr, fio->new_blkaddr, value, type_old, type_new);
++	}
++
++	mutex_lock(&mutex_reduce_he);
++	if (fio->sbi->hi->count < DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD) {
++		mutex_unlock(&mutex_reduce_he);
++		return;
++	}
++	reduce_hotness_entry(fio->sbi);
++}
++
++static void init_hc_management(struct f2fs_sb_info *sbi)
++{
++	struct file *fp;
++	loff_t pos = 0;
++	unsigned int n_clusters;
++	unsigned int i;
++	unsigned int *centers;
++
++	sbi->hi = f2fs_kmalloc(sbi, sizeof(struct hotness_info), GFP_KERNEL);
++	
++	INIT_RADIX_TREE(&sbi->hi->hotness_rt_array[0], GFP_NOFS);
++	INIT_RADIX_TREE(&sbi->hi->hotness_rt_array[1], GFP_NOFS);
++	INIT_RADIX_TREE(&sbi->hi->hotness_rt_array[2], GFP_NOFS);
++	
++	for(i = 0; i < TEMP_TYPE_NUM; i++){
++		sbi->hi->IRR_min[i] = __UINT32_MAX__ >> 2;
++	}
++
++	centers = kmalloc(sizeof(unsigned int) * sbi->n_clusters, GFP_KERNEL);
++
++	fp = filp_open("/tmp/f2fs_hotness_no", O_RDWR, 0644);
++	if (IS_ERR(fp)) {
++		printk("failed to open /tmp/f2fs_hotness.\n");
++		sbi->total_writed_block_count = 0;
++		sbi->n_clusters = N_CLUSTERS;
++		sbi->centers = kmalloc(sizeof(unsigned int) * sbi->n_clusters, GFP_KERNEL);
++		sbi->centers_valid = 0;
++		goto out;
++	}
++
++	kernel_read(fp, &n_clusters, sizeof(n_clusters), &pos);
++	sbi->n_clusters = n_clusters;
++
++	// read centers
++	for(i = 0; i < n_clusters; ++i) {
++		kernel_read(fp, &centers[i], sizeof(centers[i]), &pos);
++	}
++	sbi->centers = centers;
++	sbi->centers_valid = 1;
++
++	filp_close(fp, NULL);
++out:
++	return;
++}
++
++void f2fs_build_hc_manager(struct f2fs_sb_info *sbi)
++{
++	init_hc_management(sbi);
++}
++
++static int kmeans_thread_func(void *data)
++{
++	struct f2fs_sb_info *sbi = data;
++	struct f2fs_hc_kthread *hc_th = sbi->hc_thread;
++	wait_queue_head_t *wq = &sbi->hc_thread->hc_wait_queue_head;
++	int err;
++	unsigned int total_blocks;
++	unsigned int last_total_blocks;
++	unsigned int wait_ms;
++	wait_ms = hc_th->min_sleep_time;
++
++	set_freezable();
++	do {
++		total_blocks = sbi->hi->new_blk_cnt + sbi->hi->upd_blk_cnt;
++
++		if (total_blocks - last_total_blocks > DEF_HC_THREAD_DELTA_BLOCKS)
++			hc_decrease_sleep_time(hc_th, &wait_ms);
++		else
++			hc_increase_sleep_time(hc_th, &wait_ms);
++
++		wait_event_interruptible_timeout(*wq, kthread_should_stop() || freezing(current), msecs_to_jiffies(wait_ms));
++
++		last_total_blocks = sbi->hi->new_blk_cnt + sbi->hi->upd_blk_cnt;
++		err = f2fs_hc(sbi);
++		if (!err) sbi->centers_valid = 1;
++	} while (!kthread_should_stop());
++	return 0;
++}
++
++int f2fs_start_hc_thread(struct f2fs_sb_info *sbi)
++{
++    struct f2fs_hc_kthread *hc_th;
++	dev_t dev = sbi->sb->s_bdev->bd_dev;
++	int err = 0;
++
++	hc_th = f2fs_kmalloc(sbi, sizeof(struct f2fs_hc_kthread), GFP_KERNEL);
++	if (!hc_th) {
++		err = -ENOMEM;
++		goto out;
++	}
++
++	hc_th->min_sleep_time = DEF_HC_THREAD_MIN_SLEEP_TIME;
++	hc_th->max_sleep_time = DEF_HC_THREAD_MAX_SLEEP_TIME;
++	hc_th->no_hc_sleep_time = DEF_HC_THREAD_NOHC_SLEEP_TIME;
++
++    sbi->hc_thread = hc_th;
++	init_waitqueue_head(&sbi->hc_thread->hc_wait_queue_head);
++    sbi->hc_thread->f2fs_hc_task = kthread_run(kmeans_thread_func, sbi,
++			"f2fs_hc-%u:%u", MAJOR(dev), MINOR(dev));
++	if (IS_ERR(hc_th->f2fs_hc_task)) {
++		err = PTR_ERR(hc_th->f2fs_hc_task);
++		kfree(hc_th);
++		sbi->hc_thread = NULL;
++	}
++out:
++	return err;
++}
++
++void f2fs_stop_hc_thread(struct f2fs_sb_info *sbi) 
++{
++	struct f2fs_hc_kthread *hc_th = sbi->hc_thread;
++	
++	if (!hc_th)
++		return;
++	kthread_stop(hc_th->f2fs_hc_task);
++	kfree(hc_th);
++	sbi->hc_thread = NULL;
++}
++
++void save_hotness_entry(struct f2fs_sb_info *sbi)
++{
++	struct file *fp;
++	loff_t pos = 0;
++	unsigned int i;
++
++	fp = filp_open("/tmp/f2fs_hotness", O_RDWR|O_CREAT, 0644);
++	if (IS_ERR(fp)) goto out;
++
++	// save n_clusters
++	kernel_write(fp, &sbi->n_clusters, sizeof(sbi->n_clusters), &pos);
++	// save centers
++	for(i = 0; i < sbi->n_clusters; i++) {
++		kernel_write(fp, &sbi->centers[i], sizeof(sbi->centers[i]), &pos);
++	}
++	filp_close(fp, NULL);
++out:
++	return;
++}
++
++void release_hotness_entry(struct f2fs_sb_info *sbi)
++{
++	struct radix_tree_iter iter;
++	void __rcu **slot;
++	int type;
++
++	if (sbi->centers) kfree(sbi->centers);
++	if (sbi->hi->count == 0) return;
++	for (type = 0; type < 3; type++) {
++		radix_tree_for_each_slot(slot, &sbi->hi->hotness_rt_array[type], &iter, 0) {
++			radix_tree_delete(&sbi->hi->hotness_rt_array[type], iter.index);
++		}
++	}
++}
++
++unsigned int get_segment_hotness_avg(struct f2fs_sb_info *sbi, unsigned int segno)
++{
++	int off;
++	block_t blk_addr;
++	__u64 value;
++	__u32 IRR;
++	int type;
++	unsigned int valid = 0;
++	block_t start_addr = START_BLOCK(sbi, segno);
++	unsigned int usable_blks_in_seg = sbi->blocks_per_seg;
++	__u64 IRR_sum = 0;
++	for (off = 0; off < usable_blks_in_seg; off++) {
++		blk_addr = start_addr + off;
++		value = lookup_hotness_entry(sbi, blk_addr, &type);
++		if (type != -1)	{
++    		IRR = (value & 0xffffffff) >> 2;
++			IRR_sum += IRR;
++			valid++;
++		}
++	}
++	if (valid == 0) return __UINT32_MAX__ >> 2; 
++	else return IRR_sum / valid;
++}
++
++bool hc_can_inplace_update(struct f2fs_io_info *fio)
++{
++	unsigned int segno;
++	int type_blk, type_seg;
++	unsigned int IRR_blk, IRR_seg;
++	__u64 value;
++	if (fio->type == DATA && fio->old_blkaddr != __UINT32_MAX__) {
++		value = lookup_hotness_entry(fio->sbi, fio->old_blkaddr, &type_blk);
++	}
++	if (type_blk != -1 && fio->sbi->centers_valid) {
++		IRR_blk = (value & 0xffffffff) >> 2;
++		segno = GET_SEGNO(fio->sbi, fio->old_blkaddr);
++		IRR_seg = get_segment_hotness_avg(fio->sbi, segno);
++		type_seg = kmeans_get_type(fio, IRR_seg);
++
++		if (type_blk == type_seg)	return true;
++		else	return false;
++	} else {
++		return true;
++	}
++}
+diff --git a/fs/f2fs/hc.h b/fs/f2fs/hc.h
+new file mode 100644
+index 000000000..2de18c2fa
+--- /dev/null
++++ b/fs/f2fs/hc.h
+@@ -0,0 +1,58 @@
++#ifndef _LINUX_HC_H
++#define _LINUX_HC_H
++
++#include <linux/timex.h>
++#include <linux/workqueue.h>    /* for work queue */
++#include <linux/slab.h>         /* for kmalloc() */
++
++#define DEF_HC_THREAD_MIN_SLEEP_TIME	60000	/* milliseconds */
++#define DEF_HC_THREAD_MAX_SLEEP_TIME	3600000 /*    1 hour   */
++#define DEF_HC_THREAD_NOHC_SLEEP_TIME	300000	/* wait 5 min */
++
++#define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 1000000
++#define DEF_HC_HOTNESS_ENTRY_SHRINK_NUM 100000
++#define DEF_HC_THREAD_DELTA_BLOCKS		100000
++
++#define MIN(a, b) ((a) < (b)) ? a : b
++#define MAX(a, b) ((a) < (b)) ? b : a
++
++struct f2fs_hc_kthread {
++	struct task_struct *f2fs_hc_task;
++	wait_queue_head_t hc_wait_queue_head;
++
++	/* for hc sleep time */
++	unsigned int min_sleep_time;
++	unsigned int max_sleep_time;
++	unsigned int no_hc_sleep_time;
++};
++
++int insert_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, __u64 value, int type);
++int update_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr_old, block_t blkaddr_new, __u64 value, int type_old, int type_new);
++__u64 lookup_hotness_entry(struct f2fs_sb_info *sbi, block_t blkaddr, int* type);
++void reduce_hotness_entry(struct f2fs_sb_info *sbi);
++void save_hotness_entry(struct f2fs_sb_info *sbi);
++void release_hotness_entry(struct f2fs_sb_info *sbi);
++
++int hotness_decide(struct f2fs_io_info *fio, int *type_old_ptr, __u64 *value_ptr);
++void hotness_maintain(struct f2fs_io_info *fio, int type_old, int type_new, __u64 value);
++static inline void hc_decrease_sleep_time(struct f2fs_hc_kthread *hc_th, unsigned int *wait)
++{
++	unsigned int min_time = hc_th->min_sleep_time;
++	if ((long long)*wait - (long long)min_time < (long long)min_time)
++		*wait = min_time;
++	else
++		*wait -= min_time;
++}
++
++static inline void hc_increase_sleep_time(struct f2fs_hc_kthread *hc_th, unsigned int *wait)
++{
++	unsigned int min_time = hc_th->min_sleep_time;
++	unsigned int max_time = hc_th->max_sleep_time;
++
++	if ((long long)*wait + (long long)min_time > (long long)max_time)
++		*wait = max_time;
++	else
++		*wait += min_time;
++}
++
++#endif
+diff --git a/fs/f2fs/kmeans.c b/fs/f2fs/kmeans.c
+new file mode 100644
+index 000000000..8b6c418cf
+--- /dev/null
++++ b/fs/f2fs/kmeans.c
+@@ -0,0 +1,240 @@
++#include <linux/fs.h>
++
++#include <linux/module.h>
++#include <linux/f2fs_fs.h>
++#include <linux/random.h>
++#include <linux/radix-tree.h>
++#include <linux/timex.h>
++
++#include "f2fs.h"
++#include "node.h"
++#include "segment.h"
++#include "hc.h"
++#include "kmeans.h"
++
++#define diff(a, b) (a) < (b) ? ((b) - (a)) : ((a) - (b))
++#define MIN_3(a, b, c) ((a) < (b)) ? (((a) < (c)) ? CURSEG_HOT_DATA : CURSEG_COLD_DATA) : (((c) > (b)) ? CURSEG_WARM_DATA : CURSEG_COLD_DATA)
++#define MIN_2(a, b) ((a) < (b)) ? CURSEG_HOT_DATA : CURSEG_WARM_DATA
++#define MAX_LOOP_NUM 1000
++#define RANDOM_SEED 0  // 0为kmeans++播种，1为随机播种
++
++static void add_to_nearest_set(unsigned int data, long long *mass_center, int center_num);
++static int find_initial_cluster(unsigned int *data, int data_num, long long *mass_center, int center_num, int init_random);
++static unsigned long long random(void);
++static void bubble_sort(unsigned int *x, int num);
++
++struct timespec64 ts_start, ts_end;
++struct timespec64 ts_delta;
++
++int f2fs_hc(struct f2fs_sb_info *sbi)
++{
++    struct radix_tree_iter iter;
++	void __rcu **slot;
++	__u64 value;
++	__u32 IRR;
++	block_t blk_addr;
++    int type;
++    int center_num;
++    unsigned int *data;
++    long long *mass_center;
++    int data_num;
++    int i, flag, loop_count, j;
++    int ret = 0;
++
++    ktime_get_boottime_ts64(&ts_start);
++
++    printk("Doing f2fs_hc, count = %u.\n", sbi->hi->count);
++    if (sbi->hi->count == 0 || sbi->hi->count > 100000000) {
++        printk("In function %s, sbi->hi->count is out of valid range(1~100000000).\n", __func__);
++        return -1;
++    }
++
++    center_num = 2;
++    sbi->centers[2] = __UINT32_MAX__ >> 2;
++
++    data = vmalloc(sizeof(unsigned int) * sbi->hi->count);
++    if (!data) {
++        printk("In %s: data == NULL, count = %u.\n", __func__, sbi->hi->count);
++        return -1;
++    }
++    mass_center = kmalloc(sizeof(long long) * center_num * 3, GFP_KERNEL); //存放质心，平均值，集合元素数
++    if (!mass_center) {
++        printk("In %s: mass_center == NULL.\n", __func__);
++        return -1;
++    }
++    data_num = 0;
++    
++    for (type = 0; type < 3; type++) {
++        radix_tree_for_each_slot(slot, &sbi->hi->hotness_rt_array[type], &iter, 0) {
++			blk_addr = iter.index;
++			value = (__u64) radix_tree_lookup(&sbi->hi->hotness_rt_array[type], blk_addr);
++    		IRR = (value & 0xffffffff) >> 2;
++            if(IRR && (IRR != (__UINT32_MAX__ >> 2)))
++            {
++                data[data_num++] = IRR;
++            }
++        }
++    }
++
++    printk("In function %s, data_num = %d.\n", __func__, data_num);
++    if (data_num == 0) {
++        printk("In %s: data_num == 0.\n", __func__);
++        ret = -1;
++        goto out;
++    }
++    if (find_initial_cluster(data, data_num, mass_center, center_num, RANDOM_SEED)) {
++        printk("In %s: find_initial_cluster error.\n", __func__);
++        return -1;
++    }
++    flag = 1;
++    loop_count = 0;
++    while (flag == 1 && loop_count < MAX_LOOP_NUM)
++    {
++        flag = 0;
++        ++loop_count;
++
++        for (i = 0; i < center_num; ++i)
++        {
++            mass_center[i * 3 + 1] = 0;
++            mass_center[i * 3 + 2] = 0;
++        }
++        for (j = 0; j < data_num; ++j)
++            add_to_nearest_set(data[j], mass_center, center_num);
++        for (i = 0; i < center_num; ++i)
++        {
++            if (mass_center[i * 3 + 2] == 0)
++                continue;
++            if (mass_center[i * 3] != mass_center[i * 3 + 1] / mass_center[i * 3 + 2])
++            {
++                flag = 1;
++                mass_center[i * 3] = mass_center[i * 3 + 1] / mass_center[i * 3 + 2];
++            }
++        }
++    }
++    for (i = 0; i < center_num; ++i)
++        sbi->centers[i] = (unsigned int)mass_center[i * 3];
++    bubble_sort(sbi->centers, center_num);
++
++    if (center_num == 3) 
++        printk("centers: %u, %u, %u\n", sbi->centers[0], sbi->centers[1], sbi->centers[2]);
++    else if (center_num == 2)
++        printk("centers: %u, %u\n", sbi->centers[0], sbi->centers[1]);
++    else
++        printk("center num is error!\n");
++
++out:
++    vfree(data);
++    kfree(mass_center);
++
++    ktime_get_boottime_ts64(&ts_end);
++    ts_delta = timespec64_sub(ts_end, ts_start);
++    printk("[f2fs] time consumed: %lld (ns)\n",timespec64_to_ns(&ts_delta));
++
++    return ret;
++}
++
++int kmeans_get_type(struct f2fs_io_info *fio, __u32 IRR)
++{
++    int type;
++    if(fio->sbi->n_clusters == 3) {
++        type = MIN_3(diff(IRR, fio->sbi->centers[0]),
++                     diff(IRR, fio->sbi->centers[1]),
++                     diff(IRR, fio->sbi->centers[2]));
++    } else {
++        type = MIN_2(diff(IRR, fio->sbi->centers[0]),
++                     diff(IRR, fio->sbi->centers[1]));
++    }
++    
++    return type;
++}
++
++static int find_initial_cluster(unsigned int *data, int data_num, long long *mass_center, int center_num, int init_random)
++{
++    int i, j, k;
++    unsigned int *distance;
++    unsigned long long total_distance;
++    unsigned long long threshold;
++    unsigned long long distance_sum;
++    //随机播种s
++    if (init_random == 1)
++    {
++random_seed:
++        for (i = 0; i < center_num; ++i)
++            mass_center[i * 3] = data[(int)(random() % data_num)];
++        return 0;
++    }
++    // kmeans++播种
++    mass_center[0] = data[(int)(random() % data_num)];
++    distance = vmalloc(sizeof(unsigned int) * data_num);
++    if (!distance) {
++        printk("In %s: distance == NULL, data_num = %d.\n", __func__, data_num);
++        return -1;
++    }
++    for (k = 1; k < center_num; ++k)
++    {
++        total_distance = 0;
++        //求每一个元素到当前所有质心的距离
++        for (j = 0; j < data_num; ++j)
++        {
++            distance[j] = 0;
++            for (i = 0; i < k; i++)
++                distance[j] += diff(mass_center[i * 3], data[j]);
++            total_distance += distance[j];
++        }
++        //距离当前质心越远的元素更有可能被选为质心
++        if (total_distance == 0) goto random_seed;
++        threshold = random() % total_distance;
++        distance_sum = 0;
++        for (j = 0; j < data_num; ++j)
++        {
++            distance_sum += distance[j];
++            if (distance_sum >= threshold)
++                break;
++        }
++        //产生了新的质心
++        mass_center[k * 3] = data[j];
++    }
++    vfree(distance);
++    return 0;
++}
++
++static unsigned long long random(void)
++{
++    unsigned long long x;
++    get_random_bytes(&x, sizeof(x));
++    return x;
++}
++
++static void add_to_nearest_set(unsigned int data, long long *mass_center, int center_num)
++{
++    /*
++     * 将输入的参数点寻找最近的质心，并加入质心的函数中
++     */
++    unsigned int min = diff(mass_center[0], data);
++    int position = 0, i;
++    for (i = 1; i < center_num; i++)
++    {
++        unsigned int temp = diff(mass_center[i * 3], data);
++        if (temp < min)
++        {
++            min = temp;
++            position = i;
++        }
++    }
++    mass_center[position * 3 + 1] += data;
++    ++mass_center[position * 3 + 2];
++}
++
++static void bubble_sort(unsigned int *x, int num)
++{
++    int temp, i, j;
++    for (i = 0; i < num - 1; ++i)
++        for (j = 0; j < num - 1 - i; ++j)
++            if (x[j] > x[j + 1])
++            {
++                temp = x[j + 1];
++                x[j + 1] = x[j];
++                x[j] = temp;
++            }
++    return;
++}
+diff --git a/fs/f2fs/kmeans.h b/fs/f2fs/kmeans.h
+new file mode 100644
+index 000000000..9e4d1c911
+--- /dev/null
++++ b/fs/f2fs/kmeans.h
+@@ -0,0 +1,7 @@
++#ifndef _LINUX_KMEANS_H
++#define _LINUX_KMEANS_H 
++
++int f2fs_hc(struct f2fs_sb_info *sbi);
++int kmeans_get_type(struct f2fs_io_info *fio, __u32 IRR);
++
++#endif
+\ No newline at end of file
+diff --git a/fs/f2fs/segment.c b/fs/f2fs/segment.c
+index 95bfcff5c..baf3b8110 100644
+--- a/fs/f2fs/segment.c
++++ b/fs/f2fs/segment.c
+@@ -20,6 +20,8 @@
+ #include "segment.h"
+ #include "node.h"
+ #include "gc.h"
++#include "hc.h"
++#include "kmeans.h"
+ #include <trace/events/f2fs.h>
+ 
+ #define __reverse_ffz(x) __reverse_ffs(~(x))
+@@ -3465,8 +3467,18 @@ static void update_device_state(struct f2fs_io_info *fio)
+ 
+ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
+ {
+-	int type = __get_segment_type(fio);
+-	bool keep_order = (f2fs_lfs_mode(fio->sbi) && type == CURSEG_COLD_DATA);
++	int type;
++	bool keep_order;
++	int type_old;
++	__u64 value;
++
++	if (fio->type == DATA && (!page_private_gcing(fio->page))) {
++		type = hotness_decide(fio, &type_old, &value);
++	} else {
++		type = __get_segment_type(fio);
++	}
++
++	keep_order = (f2fs_lfs_mode(fio->sbi) && type == CURSEG_COLD_DATA);
+ 
+ 	if (keep_order)
+ 		down_read(&fio->sbi->io_order_lock);
+@@ -3486,6 +3498,10 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
+ 		goto reallocate;
+ 	}
+ 
++	if (fio->type == DATA && (!page_private_gcing(fio->page))) {
++		hotness_maintain(fio, type_old, type, value);
++    }
++
+ 	update_device_state(fio);
+ 
+ 	if (keep_order)
+@@ -3548,10 +3564,20 @@ int f2fs_inplace_write_data(struct f2fs_io_info *fio)
+ 	int err;
+ 	struct f2fs_sb_info *sbi = fio->sbi;
+ 	unsigned int segno;
++	int type;
++	int type_old;
++	__u64 value;
+ 
+ 	fio->new_blkaddr = fio->old_blkaddr;
+ 	/* i/o temperature is needed for passing down write hints */
+-	__get_segment_type(fio);
++	// __get_segment_type(fio);
++
++	if (fio->type == DATA && (!page_private_gcing(fio->page))) {
++		type = hotness_decide(fio, &type_old, &value);
++		hotness_maintain(fio, type_old, type, value);
++	} else {
++		__get_segment_type(fio);
++	}
+ 
+ 	segno = GET_SEGNO(sbi, fio->new_blkaddr);
+ 
+diff --git a/fs/f2fs/super.c b/fs/f2fs/super.c
+index 6d2eba662..fba65af7d 100644
+--- a/fs/f2fs/super.c
++++ b/fs/f2fs/super.c
+@@ -33,6 +33,7 @@
+ #include "segment.h"
+ #include "xattr.h"
+ #include "gc.h"
++#include "hc.h"
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/f2fs.h>
+@@ -3971,6 +3972,7 @@ static int f2fs_fill_super(struct super_block *sb, void *data, int silent)
+ 			le64_to_cpu(seg_i->journal->info.kbytes_written);
+ 
+ 	f2fs_build_gc_manager(sbi);
++	f2fs_build_hc_manager(sbi);
+ 
+ 	err = f2fs_build_stats(sbi);
+ 	if (err)
+@@ -4113,6 +4115,13 @@ static int f2fs_fill_super(struct super_block *sb, void *data, int silent)
+ 	}
+ 	kvfree(options);
+ 
++	/*
++	 * start the hc_thread
++	 */
++	err = f2fs_start_hc_thread(sbi);
++	if (err)
++		goto sync_free_meta;
++
+ 	/* recover broken superblock */
+ 	if (recovery) {
+ 		err = f2fs_commit_super(sbi, true);
+@@ -4230,6 +4239,10 @@ static void kill_f2fs_super(struct super_block *sb)
+ 
+ 		set_sbi_flag(sbi, SBI_IS_CLOSE);
+ 		f2fs_stop_gc_thread(sbi);
++		f2fs_stop_hc_thread(sbi);
++		save_hotness_entry(sbi);
++		release_hotness_entry(sbi);
++		kfree(sbi->hi);
+ 		f2fs_stop_discard_thread(sbi);
+ 
+ #ifdef CONFIG_F2FS_FS_COMPRESSION
+diff --git a/fs/f2fs/sysfs.c b/fs/f2fs/sysfs.c
+index 15fe30d3a..06169c984 100644
+--- a/fs/f2fs/sysfs.c
++++ b/fs/f2fs/sysfs.c
+@@ -16,6 +16,7 @@
+ 
+ #include "f2fs.h"
+ #include "segment.h"
++#include "hc.h"
+ #include "gc.h"
+ #include <trace/events/f2fs.h>
+ 
+@@ -38,6 +39,7 @@ enum {
+ 	RESERVED_BLOCKS,	/* struct f2fs_sb_info */
+ 	CPRC_INFO,	/* struct ckpt_req_control */
+ 	ATGC_INFO,	/* struct atgc_management */
++	HC_THREAD,	/* struct f2fs_hc_thread */
+ };
+ 
+ struct f2fs_attr {
+@@ -78,6 +80,8 @@ static unsigned char *__struct_ptr(struct f2fs_sb_info *sbi, int struct_type)
+ 		return (unsigned char *)&sbi->cprc_info;
+ 	else if (struct_type == ATGC_INFO)
+ 		return (unsigned char *)&sbi->am;
++	else if (struct_type == HC_THREAD)
++		return (unsigned char *)sbi->hc_thread;
+ 	return NULL;
+ }
+ 
+@@ -703,6 +707,8 @@ F2FS_RW_ATTR(FAULT_INFO_TYPE, f2fs_fault_info, inject_type, inject_type);
+ F2FS_RW_ATTR(F2FS_SBI, f2fs_sb_info, data_io_flag, data_io_flag);
+ F2FS_RW_ATTR(F2FS_SBI, f2fs_sb_info, node_io_flag, node_io_flag);
+ F2FS_RW_ATTR(CPRC_INFO, ckpt_req_control, ckpt_thread_ioprio, ckpt_thread_ioprio);
++F2FS_RW_ATTR(HC_THREAD, f2fs_hc_kthread, hc_min_sleep_time, min_sleep_time);
++F2FS_RW_ATTR(HC_THREAD, f2fs_hc_kthread, hc_max_sleep_time, max_sleep_time);
+ F2FS_GENERAL_RO_ATTR(dirty_segments);
+ F2FS_GENERAL_RO_ATTR(free_segments);
+ F2FS_GENERAL_RO_ATTR(ovp_segments);
+@@ -840,6 +846,9 @@ static struct attribute *f2fs_attrs[] = {
+ 	ATTR_LIST(atgc_age_threshold),
+ 	ATTR_LIST(gc_segment_mode),
+ 	ATTR_LIST(gc_reclaimed_segments),
++	/* For hc */
++	ATTR_LIST(hc_min_sleep_time),
++	ATTR_LIST(hc_max_sleep_time),
+ 	NULL,
+ };
+ ATTRIBUTE_GROUPS(f2fs);
