@@ -212,6 +212,10 @@ static int kmeans_thread_func(void *data)
 
 	set_freezable();
 	do {
+		last_total_blocks = sbi->hi->new_blk_cnt + sbi->hi->upd_blk_cnt;
+
+		wait_event_interruptible_timeout(*wq, kthread_should_stop() || freezing(current), msecs_to_jiffies(wait_ms));
+
 		total_blocks = sbi->hi->new_blk_cnt + sbi->hi->upd_blk_cnt;
 
 		if (total_blocks - last_total_blocks > DEF_HC_THREAD_DELTA_BLOCKS)
@@ -219,9 +223,6 @@ static int kmeans_thread_func(void *data)
 		else
 			hc_increase_sleep_time(hc_th, &wait_ms);
 
-		wait_event_interruptible_timeout(*wq, kthread_should_stop() || freezing(current), msecs_to_jiffies(wait_ms));
-
-		last_total_blocks = sbi->hi->new_blk_cnt + sbi->hi->upd_blk_cnt;
 		err = f2fs_hc(sbi);
 		if (!err) sbi->centers_valid = 1;
 	} while (!kthread_should_stop());

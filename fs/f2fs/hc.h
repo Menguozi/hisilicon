@@ -5,8 +5,8 @@
 #include <linux/workqueue.h>    /* for work queue */
 #include <linux/slab.h>         /* for kmalloc() */
 
-#define DEF_HC_THREAD_MIN_SLEEP_TIME	60000	/* milliseconds */
-#define DEF_HC_THREAD_MAX_SLEEP_TIME	3600000 /*    1 hour   */
+#define DEF_HC_THREAD_MIN_SLEEP_TIME	120000	/*    2 mins     */
+#define DEF_HC_THREAD_MAX_SLEEP_TIME	3840000 /*    64 mins   */
 #define DEF_HC_THREAD_NOHC_SLEEP_TIME	300000	/* wait 5 min */
 
 #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 1000000
@@ -38,21 +38,20 @@ void hotness_maintain(struct f2fs_io_info *fio, int type_old, int type_new, __u6
 static inline void hc_decrease_sleep_time(struct f2fs_hc_kthread *hc_th, unsigned int *wait)
 {
 	unsigned int min_time = hc_th->min_sleep_time;
-	if ((long long)*wait - (long long)min_time < (long long)min_time)
+	if ((long long)((*wait)>>1) <= (long long)min_time)
 		*wait = min_time;
 	else
-		*wait -= min_time;
+		*wait = ((*wait)>>1);
 }
 
 static inline void hc_increase_sleep_time(struct f2fs_hc_kthread *hc_th, unsigned int *wait)
 {
-	unsigned int min_time = hc_th->min_sleep_time;
 	unsigned int max_time = hc_th->max_sleep_time;
 
-	if ((long long)*wait + (long long)min_time > (long long)max_time)
+	if ((long long)((*wait)<<1) >= (long long)max_time)
 		*wait = max_time;
 	else
-		*wait += min_time;
+		*wait = ((*wait)<<1);
 }
 
 #endif
