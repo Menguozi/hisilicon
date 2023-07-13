@@ -215,6 +215,7 @@ static void update_general_status(struct f2fs_sb_info *sbi)
 	}
 
 	si->inplace_count = atomic_read(&sbi->inplace_count);
+	si->outplace_count = atomic_read(&sbi->outplace_count);
 }
 
 /*
@@ -533,6 +534,7 @@ static int stat_show(struct seq_file *s, void *v)
 		seq_printf(s, "IPU: %u blocks\n", si->inplace_count);
 		seq_printf(s, "SSR: %u blocks in %u segments\n",
 			   si->block_count[SSR], si->segment_count[SSR]);
+		seq_printf(s, "OPU: %u blocks\n", si->outplace_count);
 		seq_printf(s, "LFS: %u blocks in %u segments\n",
 			   si->block_count[LFS], si->segment_count[LFS]);
 
@@ -607,6 +609,7 @@ int f2fs_build_stats(struct f2fs_sb_info *sbi)
 	atomic_set(&sbi->compr_inode, 0);
 	atomic64_set(&sbi->compr_blocks, 0);
 	atomic_set(&sbi->inplace_count, 0);
+	atomic_set(&sbi->outplace_count, 0);
 	for (i = META_CP; i < META_MAX; i++)
 		atomic_set(&sbi->meta_count[i], 0);
 

@@ -3489,6 +3489,7 @@ reallocate:
 		invalidate_mapping_pages(META_MAPPING(fio->sbi),
 					fio->old_blkaddr, fio->old_blkaddr);
 		f2fs_invalidate_compress_page(fio->sbi, fio->old_blkaddr);
+		stat_inc_outplace_blocks(fio->sbi);
 	}
 
 	/* writeout dirty page into bdev */
